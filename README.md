@@ -49,10 +49,10 @@ flowchart LR
     W -- shutdown -h --> ec2
 ```
 
-1. `launch_rig.py provision` creates the bucket (public access blocked), uploads `bootstrap/`, and creates the role and security group. The role can read `bootstrap/` in the bucket, read the Hugging Face token parameter, and register with SSM.
-2. `launch_rig.py launch` resolves the AMI from its SSM alias and starts the instance. User data arms `shutdown -h +180` and runs `bootstrap.sh`, which installs ComfyUI, downloads the model groups listed in `rig.config.toml`, starts ComfyUI as a systemd service bound to 127.0.0.1, enables the watchdog timer and then cancels the 180 minute shutdown.
+1. `launch_rig.py provision` creates the bucket, or confirms that the caller's account owns an existing one, and blocks public access on it either way. It uploads `bootstrap/` and creates the role and security group; an existing group is reused only if it carries the rig tags and has no inbound rules. The role can read `bootstrap/` in the bucket, read the Hugging Face token parameter, and register with SSM.
+2. `launch_rig.py launch` resolves the AMI from its SSM alias and starts the instance. User data arms `shutdown -h +180`, installs a cloud-init per-boot script that re-arms it on every later boot until the watchdog timer is enabled, and runs `bootstrap.sh`, which installs ComfyUI and its custom nodes at the revisions in [`bootstrap/versions.env`](bootstrap/versions.env), downloads the model groups listed in `rig.config.toml`, starts ComfyUI as a systemd service bound to 127.0.0.1, enables the watchdog timer and then cancels the 180 minute shutdown.
 3. `launch_rig.py tunnel` forwards local port 8188 to ComfyUI through SSM. There is no SSH and no open port.
-4. `run_job.py` reads a job TOML, loads the API-format workflow for each model from [`workflows/`](workflows/), writes job values into nodes titled `RIG_*` (prompt, seed, start image, frame count), queues it, polls `/history`, downloads the outputs and writes `manifest.json` with every parameter and the elapsed time.
+4. `run_job.py` reads a job TOML, loads the API-format workflow for each model from [`workflows/`](workflows/), writes job values into nodes titled `RIG_*` (prompt, seed, start image, frame count), queues it, polls `/history`, downloads the outputs and writes `manifest.json`. The manifest holds the job values, the elapsed time per model, the fps and effective frame count, the path of each submitted workflow (`<model>/workflow_api.json`, which carries the sampler, steps, guidance and scheduler settings) and the ComfyUI `/system_stats` response (ComfyUI, Python and PyTorch versions and the GPU devices). It does not record model file hashes; those are in `/opt/models/models.lock.json` on the instance. A bake-off in which any model fails exits 1; `--allow-partial` accepts it when at least one model succeeded.
 5. `s3_sync.py` uploads the run folder and prints presigned links valid for 7 days (`PRESIGN_TTL_S` in [`runner/s3_sync.py`](runner/s3_sync.py)).
 
 ## Results
@@ -144,11 +144,14 @@ A segment is not exactly 5 s: Wan 2.2 renders 81 frames at 16 fps (5.0625 s) and
 
 | Layer | Setting | Source |
 |---|---|---|
-| Fail-safe at boot | `shutdown -h +180` in user data, cancelled once the watchdog is live | `launch_rig.py`, `bootstrap/bootstrap.sh` |
+| Fail-safe at boot | `shutdown -h +180` in user data, re-armed on every boot by a cloud-init per-boot script until the watchdog timer is enabled, cancelled once the watchdog is live | `launch_rig.py`, `bootstrap/bootstrap.sh` |
 | Stuck bootstrap | stop if bootstrap has not finished after 3 h | `bootstrap/idle_watchdog.sh` |
 | GPU idle | stop after `idle_stop_minutes = 30` with GPU use under 5 % and an empty ComfyUI queue | `rig.config.toml` |
+| GPU telemetry | `nvidia-smi` is bounded by a 30 s timeout; a hung or non-numeric reading counts as idle, so the queue alone decides | `bootstrap/idle_watchdog.sh` |
 | Hung job | stop after the ComfyUI queue is busy for `max_job_minutes = 360` | `rig.config.toml` |
-| Network | security group with no inbound rules; ComfyUI bound to 127.0.0.1; access through SSM only | `launch_rig.py` |
+| Network | security group with no inbound rules (an existing group with inbound rules or without the rig tags is refused); ComfyUI bound to 127.0.0.1; access through SSM only | `launch_rig.py` |
+| Bucket | ownership checked with `ExpectedBucketOwner`; public access blocked on new and existing buckets | `launch_rig.py` |
+| Teardown | `stop` and `terminate` act only on an instance carrying every rig tag; `deprovision` deletes only a security group in the rig's VPC that carries every rig tag | `launch_rig.py` |
 | Secrets | `HF_TOKEN` stored as an SSM SecureString and read on the instance; the dry run redacts it | `launch_rig.py`, `dry_run.py` |
 
 The watchdog runs every 5 minutes from a systemd timer, with a 600 s grace period after each boot. The instance is launched with `InstanceInitiatedShutdownBehavior=stop`, so a watchdog shutdown stops it. A stopped instance is not billed for compute; its 300 GB gp3 root volume (`root_volume_gb` in `rig.config.toml`) is billed until `terminate`. Check the current on-demand rate for `g6e.xlarge` in your region before launching; this repo records no prices.
@@ -182,14 +185,14 @@ jobs/                  examples/, live_test/ and headphones_test/ job files
 personas/ products/    persona notes; product images (gitignored)
 results/               16 recorded run manifests and summarize.py
 docs/                  data.json, chart SVGs, Wan 2.2 clip, landing page
-tests/                 pytest suite; boto3, subprocess and HTTP are stubbed
+tests/                 pytest suite; boto3 is stubbed, HTTP runs against a local fake ComfyUI, ffmpeg tests skip without ffmpeg
 ```
 
 ## Design decisions and limitations
 
 - One instance, no queue service. Jobs are submitted from the workstation through the tunnel, so the workstation must stay connected for the length of a run. The median recorded clip took 1,422 s (Wan 2.2) and 1,452 s (HunyuanVideo 1.5).
 - Workflows are found by node title rather than node ID, so a workflow exported again from the ComfyUI UI keeps working if the `RIG_*` titles are kept.
-- ComfyUI, its custom nodes and torch are installed from their latest versions at boot and are not pinned. A later boot can produce a different environment from the one that made the recorded runs.
+- [`bootstrap/versions.env`](bootstrap/versions.env) pins ComfyUI, its custom nodes and PyTorch, and `bootstrap/models.json` entries accept `revision` and `sha256`. No pins are set yet: the commits behind the recorded runs were not recorded, so a boot installs the current heads. Each boot writes what it installed to `/opt/rig-bootstrap/installed-versions.txt` and `/opt/models/models.lock.json`. Cached model files are kept only if their size matches the Hub metadata (and their sha256, when pinned).
 - Two of the 16 recorded runs failed before queueing because ComfyUI was not reachable through the tunnel. `run_job.py` now checks ComfyUI before it creates a run folder.
 - The prototype's goal was a clip with a consistent presenter and a legible product label. No run recorded a pass or fail against that goal.
 - The composited start frame path (`jobs/examples/start_frame.toml`) has no recorded run. The recorded video runs started from FLUX stills generated from text.

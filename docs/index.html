@@ -42,7 +42,7 @@
     <section>
       <h2>How it works</h2>
       <p><code>launch_rig.py</code> creates an S3 bucket, an instance role and a security group with no inbound rules, then starts a <code>g6e.xlarge</code> from the AWS Deep Learning Base AMI. First boot installs ComfyUI and the FLUX.1-dev, Wan 2.2 A14B and HunyuanVideo 1.5 weights, binds ComfyUI to 127.0.0.1 and enables a watchdog timer. The workstation reaches ComfyUI through an SSM port forward.</p>
-      <p><code>run_job.py</code> loads an API-format workflow per model, sets the prompt, seed, start image and frame count on nodes titled <code>RIG_*</code>, queues it, downloads the outputs and writes a manifest. <code>run_chain.py</code> builds longer clips from 5 s segments, each starting from the last frame of the one before. <code>launch_rig.py</code> and <code>run_job.py</code> accept <code>--dry-run</code> and print the AWS calls, HTTP requests and ffmpeg commands without running them; the chain and sync scripts have no dry-run mode.</p>
+      <p><code>run_job.py</code> loads an API-format workflow per model, sets the prompt, seed, start image and frame count on nodes titled <code>RIG_*</code>, queues it, downloads the outputs and writes a manifest with the submitted workflow and the ComfyUI and PyTorch versions. <code>run_chain.py</code> builds longer clips from 5 s segments, each starting from the last frame of the one before. <code>launch_rig.py</code> and <code>run_job.py</code> accept <code>--dry-run</code> and print the AWS calls, HTTP requests and ffmpeg commands without running them; the chain and sync scripts have no dry-run mode.</p>
       <pre class="mermaid">
 flowchart LR
   launch[launch_rig.py] -- boto3 --> s3[(S3 bucket)]
@@ -56,7 +56,7 @@ flowchart LR
   dog -- shutdown -h --> ec2
       </pre>
       <aside class="note">
-        <p>Watchdog limits: <code>idle_stop_minutes = 30</code> and <code>max_job_minutes = 360</code> in <code>rig.config.toml</code>; 3 h bootstrap limit and 600 s boot grace in <code>bootstrap/idle_watchdog.sh</code>; 180 minute fail-safe shutdown in the user data in <code>launch_rig.py</code>.</p>
+        <p>Watchdog limits: <code>idle_stop_minutes = 30</code> and <code>max_job_minutes = 360</code> in <code>rig.config.toml</code>; 3 h bootstrap limit and 600 s boot grace in <code>bootstrap/idle_watchdog.sh</code>; 180 minute fail-safe shutdown in the user data in <code>launch_rig.py</code>, re-armed on every boot until the watchdog timer is enabled. A hung or unreadable <code>nvidia-smi</code> reading counts as idle.</p>
       </aside>
     </section>
 
@@ -89,7 +89,7 @@ uv run python runner/run_job.py jobs/examples/shaker_demo.toml --dry-run</code><
     <section>
       <h2>Limitations</h2>
       <ul>
-        <li>ComfyUI, its custom nodes and torch are installed at their latest versions on first boot and are not pinned.</li>
+        <li><code>bootstrap/versions.env</code> can pin ComfyUI, its custom nodes and PyTorch, and <code>bootstrap/models.json</code> can pin model revisions and sha256 values, but no pins are set: the commits behind the recorded runs were not recorded. Each boot records what it installed on the instance.</li>
         <li>Jobs are submitted from the workstation; it must stay connected through the tunnel for the length of a run.</li>
         <li>The prototype goal, a clip with a consistent presenter and a legible product label, has no recorded pass or fail.</li>
         <li>The composited start frame workflow has no recorded run.</li>
