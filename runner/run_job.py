@@ -31,9 +31,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from comfy_client import DEFAULT_POLL_S, ComfyClient, ComfyError
 from media import ffmpeg_available, portrait_encode_command, run_ffmpeg, side_by_side_command
-from s3_sync import PRESIGN_TTL_S, SHAREABLE_SUFFIXES, load_aws_config, sync_run
-
 from rig_config import REPO_DIR, load_config
+from s3_sync import PRESIGN_TTL_S, SHAREABLE_SUFFIXES, load_aws_config, sync_run
 
 VIDEO_SUFFIXES = {".mp4", ".webm", ".webp", ".gif"}
 REFERENCE_KEYS = ("start_image", "mask_image")

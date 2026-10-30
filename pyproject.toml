@@ -27,6 +27,11 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "N", "UP", "B", "SIM", "RUF"]
 
+[tool.ruff.lint.isort]
+# The scripts import each other by module name (runner/ is on sys.path), so
+# list them as first-party for a stable import order.
+known-first-party = ["comfy_client", "conftest", "dry_run", "launch_rig", "media", "rig_config", "run_job", "s3_sync"]
+
 [tool.pytest.ini_options]
 pythonpath = [".", "runner"]
 testpaths = ["tests"]
