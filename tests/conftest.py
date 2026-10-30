@@ -1,4 +1,5 @@
-"""Shared stubs. No test makes an AWS call, a network call or runs ffmpeg."""
+"""Shared stubs. No test makes an AWS call or a network call. Only
+test_media_ffmpeg.py runs ffmpeg, and it is skipped when ffmpeg is absent."""
 
 from __future__ import annotations
 

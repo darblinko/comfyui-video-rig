@@ -32,6 +32,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - name: ffmpeg for tests/test_media_ffmpeg.py
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - run: pip install "boto3>=1.34" "pytest>=8"
       - run: python -m pytest -q
       - name: dry runs (no credentials, no network)
