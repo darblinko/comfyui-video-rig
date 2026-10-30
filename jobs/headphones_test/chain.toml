@@ -1,0 +1,34 @@
+# Headphones test: one 20 s clip per model, built from four chained 5 s
+# segments. Segment 1 starts from start_frame; segment n starts from the last
+# frame of segment n-1. Every model gets the same seed for the same segment.
+#
+#   python3 runner/run_job.py jobs/headphones_test/frame_headphones.toml
+#   cp outputs/<run_id>/flux_persona_ref/<chosen>.png outputs/headphones_test/frame0.png
+#   python3 chain/run_chain.py jobs/headphones_test/chain.toml
+#   python3 chain/postprocess.py jobs/headphones_test/chain.toml
+#
+# Segment jobs are written to jobs/headphones_test/generated/; frames, the
+# chain state and the deliverables go to outputs/<name>/.
+
+name = "headphones_test"
+models = ["wan22", "hunyuan15"]
+start_frame = "outputs/headphones_test/frame0.png"
+# Optional. postprocess.py muxes it onto the clips when the file exists.
+voiceover = "outputs/headphones_test/voiceover.mp3"
+
+job_type = "product_demo_video"
+persona_id = "presenter_desk_v1"
+segment_seconds = 5
+resolution = [720, 1280]
+seed_base = 555100  # segment n uses seed_base + n
+
+# Segment n prompt: "<persona>, <beats[n-1]>, <suffix>"
+persona = "photorealistic video of a cute geeky young woman in her early twenties, round glasses, dark messy bun, oversized lavender hoodie, fluffy pink cat-ear gaming headphones with glowing pink LED rings"
+suffix = "fixed static camera, no camera movement, cozy bedroom with soft RGB glow, warm lighting, realistic hand-object interaction"
+negative_prompt = "camera pan, camera zoom, camera movement, dolly, scene cut, deformed hands, extra fingers, fused fingers, warped face, plastic skin, flickering, morphing, watermark, text, anime, cartoon"
+beats = [
+    "wearing the headphones with both hands on the ear cups, she gently lifts the headphones off her head and lowers them to hold in front of her chest, speaking to the camera with natural mouth movement the whole time",
+    "holding the fluffy pink cat-ear headphones in front of her chest, she rotates one ear cup toward the camera and points her index finger at the small USB-C charging port on the bottom edge of the ear cup, speaking to the camera with natural mouth movement",
+    "she slowly moves the headphone ear cup closer to the camera until the ear cup with its glowing LED ring fills most of the frame, keeping her index finger next to the USB-C charging port, still speaking to the camera",
+    "extreme close-up of the fluffy headphone ear cup held toward the camera, she taps her fingertip on the USB-C charging port and tilts the ear cup slightly so the port is clearly visible, still speaking",
+]
