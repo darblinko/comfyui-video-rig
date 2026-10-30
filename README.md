@@ -16,7 +16,7 @@ Figures come from the 16 run manifests in [`results/manifests/`](results/manifes
 - Runs a job file through one or more models with the same prompt and seed, downloads the outputs, encodes a 9:16 MP4 per model and stacks the first two side by side ([`runner/run_job.py`](runner/run_job.py)).
 - Chains 5 s image-to-video segments into longer clips, each segment starting from the last frame of the one before ([`chain/`](chain/)).
 - Stops the instance on GPU idle, on a hung job and on a stuck bootstrap ([`bootstrap/idle_watchdog.sh`](bootstrap/idle_watchdog.sh)).
-- Prints every AWS call, ComfyUI request and ffmpeg command without executing any of them when given `--dry-run`.
+- `launch_rig.py` and `runner/run_job.py` accept `--dry-run`, which prints every AWS call, ComfyUI request and ffmpeg command without executing any of them. `chain/run_chain.py`, `chain/postprocess.py` and `runner/s3_sync.py` have no dry-run mode.
 
 ## How it works
 

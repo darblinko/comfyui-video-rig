@@ -32,17 +32,17 @@
 
     <section>
       <h2>Problem</h2>
-      <p>A 5 s, 720x1280 image-to-video clip took between 1,378.9 s and 1,587.9 s on the recorded runs. Comparing two models means hours of GPU time per prompt. A GPU instance left running after a session, or held by a hung job, bills until someone notices.</p>
+      <p>A 5 s, 720x1280 image-to-video clip took between 1,378.9 s and 1,587.9 s on the recorded runs, measured from queueing to the last download. The two-model bake-off took 3,078.3 s (51.3 minutes) for one prompt on that measure; GPU time itself was not recorded. A GPU instance left running after a session, or held by a hung job, bills until someone notices.</p>
       <p>ComfyUI has no authentication of its own. Exposing its port to the internet exposes the instance.</p>
       <aside class="note">
-        <p>Clip times: <code>results/manifests/*.json</code>, field <code>elapsed_s</code>, summarized by <code>python3 results/summarize.py</code>.</p>
+        <p>Clip times: <code>results/manifests/*.json</code>, field <code>elapsed_s</code>, summarized by <code>python3 results/summarize.py</code>. Bake-off: <code>results/manifests/20260711-131254-bakeoff_shaker.json</code>, 1,490.4 s (Wan 2.2) plus 1,587.9 s (HunyuanVideo 1.5).</p>
       </aside>
     </section>
 
     <section>
       <h2>How it works</h2>
       <p><code>launch_rig.py</code> creates an S3 bucket, an instance role and a security group with no inbound rules, then starts a <code>g6e.xlarge</code> from the AWS Deep Learning Base AMI. First boot installs ComfyUI and the FLUX.1-dev, Wan 2.2 A14B and HunyuanVideo 1.5 weights, binds ComfyUI to 127.0.0.1 and enables a watchdog timer. The workstation reaches ComfyUI through an SSM port forward.</p>
-      <p><code>run_job.py</code> loads an API-format workflow per model, sets the prompt, seed, start image and frame count on nodes titled <code>RIG_*</code>, queues it, downloads the outputs and writes a manifest. <code>run_chain.py</code> builds longer clips from 5 s segments, each starting from the last frame of the one before. Every command accepts <code>--dry-run</code> and prints the AWS calls, HTTP requests and ffmpeg commands without running them.</p>
+      <p><code>run_job.py</code> loads an API-format workflow per model, sets the prompt, seed, start image and frame count on nodes titled <code>RIG_*</code>, queues it, downloads the outputs and writes a manifest. <code>run_chain.py</code> builds longer clips from 5 s segments, each starting from the last frame of the one before. <code>launch_rig.py</code> and <code>run_job.py</code> accept <code>--dry-run</code> and print the AWS calls, HTTP requests and ffmpeg commands without running them; the chain and sync scripts have no dry-run mode.</p>
       <pre class="mermaid">
 flowchart LR
   launch[launch_rig.py] -- boto3 --> s3[(S3 bucket)]
