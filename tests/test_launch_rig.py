@@ -11,14 +11,16 @@ from launch_rig import (
     cmd_terminate,
     delete_security_group,
     ensure_bucket,
+    ensure_role,
     ensure_security_group,
     find_rig_instance,
-    instance_policy,
     run_instance,
     run_instance_params,
     ssm_session_command,
+    store_hf_token,
 )
 from rig_config import load_config
+from rig_iam import EC2_TRUST_POLICY, instance_policy, ownership_tags, tag_pairs
 
 DEFAULT_VPC = {"ec2.describe_vpcs": {"Vpcs": [{"VpcId": "vpc-1"}]}}
 NO_SECURITY_GROUPS = {"ec2.describe_security_groups": {"SecurityGroups": []}}
@@ -56,13 +58,131 @@ def owned_cfg() -> dict:
     return load_config(env=env)
 
 
-def test_instance_policy_is_read_only_and_scoped(cfg):
+# The ssm:GetParameter* grant of AmazonSSMManagedInstanceCore (AWS managed policy reference).
+SSM_CORE_PARAMETER_GRANT = {"Effect": "Allow", "Action": ["ssm:GetParameter", "ssm:GetParameters"], "Resource": "*"}
+TOKEN_ARN = "arn:aws:ssm:us-west-2:ACCOUNT:parameter/comfyui-video-rig/hf-token"
+
+
+def as_list(value) -> list:
+    return value if isinstance(value, list) else [value]
+
+
+def statement_matches(statement: dict, action: str, resource: str) -> bool:
+    if action not in as_list(statement["Action"]):
+        return False
+    if "NotResource" in statement:
+        return resource not in as_list(statement["NotResource"])
+    return any(r == "*" or r == resource for r in as_list(statement["Resource"]))
+
+
+def allowed(statements: list[dict], action: str, resource: str) -> bool:
+    """IAM evaluation for unconditioned statements: an explicit Deny wins over any Allow."""
+    matching = [st for st in statements if "Condition" not in st and statement_matches(st, action, resource)]
+    return any(st["Effect"] == "Allow" for st in matching) and not any(st["Effect"] == "Deny" for st in matching)
+
+
+def test_instance_policy_allows_only_bootstrap_reads_and_the_token(cfg):
     policy = instance_policy(cfg, "ACCOUNT")
-    actions = {action for statement in policy["Statement"] for action in statement["Action"]}
-    assert actions == {"s3:GetObject", "s3:ListBucket", "ssm:GetParameter"}
-    resources = [statement["Resource"] for statement in policy["Statement"]]
-    assert f"arn:aws:s3:::{TEST_BUCKET}/bootstrap/*" in resources
-    assert resources[2].endswith(":parameter/comfyui-video-rig/hf-token")
+    allows = [st for st in policy["Statement"] if st["Effect"] == "Allow"]
+    assert {action for st in allows for action in st["Action"]} == {"s3:GetObject", "s3:ListBucket", "ssm:GetParameter"}
+    assert f"arn:aws:s3:::{TEST_BUCKET}/bootstrap/*" in [st["Resource"] for st in allows]
+
+
+def test_combined_policies_read_only_the_rig_token_parameter(cfg):
+    statements = [SSM_CORE_PARAMETER_GRANT, *instance_policy(cfg, "ACCOUNT")["Statement"]]
+    other = "arn:aws:ssm:us-west-2:ACCOUNT:parameter/prod/db-password"
+    assert allowed(statements, "ssm:GetParameter", TOKEN_ARN)
+    assert not allowed(statements, "ssm:GetParameter", other)
+    assert not allowed(statements, "ssm:GetParameters", other)
+    assert not allowed(statements, "ssm:GetParameters", TOKEN_ARN.replace("hf-token", "other"))
+
+
+def owned_iam_responses(cfg: dict, profile_roles=("comfyui-video-rig-role",)) -> dict:
+    role, profile, param = "comfyui-video-rig-role", "comfyui-video-rig-profile", "/comfyui-video-rig/hf-token"
+    return {
+        "sts.get_caller_identity": {"Account": "111122223333"},
+        "iam.get_role": {
+            "Role": {"Tags": tag_pairs(ownership_tags(cfg, role)), "AssumeRolePolicyDocument": EC2_TRUST_POLICY}
+        },
+        "iam.get_instance_profile": {
+            "InstanceProfile": {
+                "Roles": [{"RoleName": name} for name in profile_roles],
+                "Tags": tag_pairs(ownership_tags(cfg, profile)),
+            }
+        },
+        "ssm.list_tags_for_resource": {"TagList": tag_pairs(ownership_tags(cfg, param))},
+    }
+
+
+NO_IAM = {
+    "sts.get_caller_identity": {"Account": "111122223333"},
+    "iam.get_role": client_error("NoSuchEntity"),
+    "iam.get_instance_profile": client_error("NoSuchEntity"),
+    "ssm.list_tags_for_resource": client_error("InvalidResourceId"),
+}
+IAM_WRITES = ("iam.attach_role_policy", "iam.put_role_policy", "iam.add_role_to_instance_profile")
+
+
+def test_new_role_and_profile_carry_the_ownership_tags(cfg):
+    rig = rig_for(cfg, NO_IAM)
+    ensure_role(rig)
+    for operation, name in (("iam.create_role", "comfyui-video-rig-role"),
+                            ("iam.create_instance_profile", "comfyui-video-rig-profile")):  # fmt: skip
+        tags = {t["Key"]: t["Value"] for t in rig.session.kwargs_of(operation)[0]["Tags"]}
+        assert tags == {"Project": "comfyui-video-rig", "Name": name, "RigBucket": TEST_BUCKET}
+    assert rig.session.kwargs_of("iam.add_role_to_instance_profile")
+
+
+def test_owned_role_is_updated(cfg):
+    rig = rig_for(cfg, owned_iam_responses(cfg))
+    ensure_role(rig)
+    assert "iam.create_role" not in rig.session.operations()
+    assert rig.session.kwargs_of("iam.put_role_policy")
+    assert "iam.add_role_to_instance_profile" not in rig.session.operations()
+
+
+def test_role_of_another_deployment_is_not_changed(cfg):
+    responses = owned_iam_responses(cfg)
+    other = {**cfg, "s3": {**cfg["s3"], "outputs_bucket": "alices-bucket"}}
+    responses["iam.get_role"]["Role"]["Tags"] = tag_pairs(ownership_tags(other, "comfyui-video-rig-role"))
+    rig = rig_for(cfg, responses)
+    with pytest.raises(SystemExit, match="lacks the rig tags"):
+        ensure_role(rig)
+    assert not [op for op in rig.session.operations() if op in IAM_WRITES]
+
+
+def test_role_trusting_another_principal_is_not_changed(cfg):
+    responses = owned_iam_responses(cfg)
+    trust = {"Statement": [{"Effect": "Allow", "Principal": {"AWS": "arn:aws:iam::444455556666:root"},
+                            "Action": "sts:AssumeRole"}]}  # fmt: skip
+    responses["iam.get_role"]["Role"]["AssumeRolePolicyDocument"] = trust
+    rig = rig_for(cfg, responses)
+    with pytest.raises(SystemExit, match="other than EC2"):
+        ensure_role(rig)
+    assert not [op for op in rig.session.operations() if op in IAM_WRITES]
+
+
+def test_profile_holding_an_unrelated_role_is_refused(cfg):
+    rig = rig_for(cfg, owned_iam_responses(cfg, profile_roles=("admin-role",)))
+    with pytest.raises(SystemExit, match="holds role admin-role"):
+        ensure_role(rig)
+    assert "iam.add_role_to_instance_profile" not in rig.session.operations()
+
+
+def test_new_token_parameter_is_tagged(cfg):
+    rig = rig_for(cfg, NO_IAM)
+    store_hf_token(rig, "hf_x")
+    (put,) = rig.session.kwargs_of("ssm.put_parameter")
+    assert "Overwrite" not in put
+    assert {"Key": "RigBucket", "Value": TEST_BUCKET} in put["Tags"]
+
+
+def test_token_parameter_of_another_deployment_is_not_overwritten(cfg):
+    responses = {**owned_iam_responses(cfg), "ssm.list_tags_for_resource": {"TagList": []}}
+    rig = rig_for(cfg, responses)
+    with pytest.raises(SystemExit, match="lacks the rig tags"):
+        store_hf_token(rig, "hf_x")
+    assert "ssm.put_parameter" not in rig.session.operations()
 
 
 def test_user_data_installs_a_per_boot_fail_safe_before_any_download(cfg):
@@ -202,19 +322,52 @@ def test_ssm_commands_rely_on_the_ambient_profile(cfg):
 
 
 def test_deprovision_treats_missing_resources_as_done(cfg, tmp_path):
-    gone = client_error("NoSuchEntity")
     responses = {
         **DEFAULT_VPC,
         **SUBNETS,
+        **NO_IAM,
         "ec2.describe_instances": {"Reservations": []},
-        "iam.remove_role_from_instance_profile": gone,
-        "iam.delete_instance_profile": gone,
-        "ssm.delete_parameter": client_error("ParameterNotFound"),
         "ec2.describe_security_groups": {"SecurityGroups": [{"GroupId": "sg-1"}]},
     }
     rig = rig_for(cfg, responses, tmp_path)
     cmd_deprovision(rig)
     assert rig.session.kwargs_of("ec2.delete_security_group") == [{"GroupId": "sg-1"}]
+    assert not [op for op in rig.session.operations() if op.startswith("iam.delete") or op == "ssm.delete_parameter"]
+
+
+def test_deprovision_tolerates_resources_deleted_meanwhile(cfg, tmp_path):
+    gone = client_error("NoSuchEntity")
+    responses = {
+        **DEFAULT_VPC,
+        **SUBNETS,
+        **owned_iam_responses(cfg),
+        "ec2.describe_instances": {"Reservations": []},
+        "iam.remove_role_from_instance_profile": gone,
+        "iam.delete_instance_profile": gone,
+        "ssm.delete_parameter": client_error("ParameterNotFound"),
+        **NO_SECURITY_GROUPS,
+    }
+    rig = rig_for(cfg, responses, tmp_path)
+    cmd_deprovision(rig)
+    assert rig.session.kwargs_of("iam.delete_role") == [{"RoleName": "comfyui-video-rig-role"}]
+
+
+def test_deprovision_leaves_another_deployments_iam_and_token_alone(cfg, tmp_path):
+    responses = {
+        **DEFAULT_VPC,
+        **SUBNETS,
+        **owned_iam_responses(cfg, profile_roles=("comfyui-video-rig-role", "admin-role")),
+        "ec2.describe_instances": {"Reservations": []},
+        "ssm.list_tags_for_resource": {"TagList": []},
+        **NO_SECURITY_GROUPS,
+    }
+    responses["iam.get_role"]["Role"]["Tags"] = []
+    rig = rig_for(cfg, responses, tmp_path)
+    with pytest.raises(SystemExit, match="deprovision incomplete"):
+        cmd_deprovision(rig)
+    touched = [op for op in rig.session.operations() if op.startswith(("iam.delete", "iam.detach", "iam.remove"))]
+    assert touched == []
+    assert "ssm.delete_parameter" not in rig.session.operations()
 
 
 def test_deprovision_ignores_a_state_file_group_without_the_rig_tags(owned_cfg, tmp_path):
@@ -226,6 +379,7 @@ def test_deprovision_ignores_a_state_file_group_without_the_rig_tags(owned_cfg, 
     responses = {
         **DEFAULT_VPC,
         **SUBNETS,
+        **NO_IAM,
         "ec2.describe_instances": {"Reservations": []},
         "ec2.describe_security_groups": describe_security_groups,
     }
@@ -242,6 +396,7 @@ def test_deprovision_reports_real_failures(cfg, tmp_path):
     responses = {
         **DEFAULT_VPC,
         **SUBNETS,
+        **owned_iam_responses(cfg),
         "ec2.describe_instances": {"Reservations": []},
         "iam.delete_role": client_error("DeleteConflict"),
         **NO_SECURITY_GROUPS,

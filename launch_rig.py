@@ -25,11 +25,18 @@ from botocore.exceptions import ClientError
 from dry_run import DryRunSession, placeholder_responses
 from rig_config import REPO_DIR, load_config
 from rig_config import aws_session as rig_aws_session
+from rig_iam import (
+    cleanup_plan,
+    ensure_instance_role,
+    ownership_tags,
+    parameter_state,
+    refuse,
+    resource_names,
+    tag_pairs,
+)
 
 STATE_FILE = REPO_DIR / ".rig_state.json"
 GPU_QUOTA_CODE = "L-DB2E81BA"  # Running On-Demand G and VT instances (vCPUs)
-SSM_MANAGED_POLICY = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
-INLINE_POLICY_NAME = "rig-instance-access"
 
 COMMAND_HELP = """commands:
   provision    Create the S3 outputs bucket, IAM role/instance profile, security group
@@ -42,17 +49,6 @@ COMMAND_HELP = """commands:
   session      Interactive SSM shell on the instance
   deprovision  Delete the SG, IAM role/profile and HF token parameter (bucket is kept)
 """
-
-EC2_TRUST_POLICY = {
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Effect": "Allow",
-            "Principal": {"Service": "ec2.amazonaws.com"},
-            "Action": "sts:AssumeRole",
-        }
-    ],
-}
 
 
 @dataclass(frozen=True)
@@ -70,16 +66,6 @@ class Rig:
 
 def aws_session(cfg: dict) -> boto3.Session:
     return rig_aws_session(cfg["aws"]["region"])
-
-
-def resource_names(cfg: dict) -> dict:
-    name = cfg["rig"]["name"]
-    return {
-        "role": f"{name}-role",
-        "profile": f"{name}-profile",
-        "sg": f"{name}-sg",
-        "hf_token_param": f"/{name}/hf-token",
-    }
 
 
 def read_state(rig: Rig) -> dict:
@@ -148,67 +134,9 @@ def ensure_bucket(rig: Rig) -> None:
     print(f"public access blocked: s3://{bucket}")
 
 
-def instance_policy(cfg: dict, account_id: str) -> dict:
-    bucket = cfg["s3"]["outputs_bucket"]
-    region = cfg["aws"]["region"]
-    token_param = resource_names(cfg)["hf_token_param"]
-    # The instance only ever reads its bootstrap files; run outputs are synced
-    # from the workstation. No PutObject: a compromised box must not be able to
-    # overwrite bootstrap/bootstrap.sh, which the next launch runs as root.
-    return {
-        "Version": "2012-10-17",
-        "Statement": [
-            {
-                "Sid": "BootstrapRead",
-                "Effect": "Allow",
-                "Action": ["s3:GetObject"],
-                "Resource": f"arn:aws:s3:::{bucket}/bootstrap/*",
-            },
-            {
-                "Sid": "BootstrapList",
-                "Effect": "Allow",
-                "Action": ["s3:ListBucket"],
-                "Resource": f"arn:aws:s3:::{bucket}",
-                "Condition": {"StringLike": {"s3:prefix": "bootstrap/*"}},
-            },
-            {
-                "Sid": "HfToken",
-                "Effect": "Allow",
-                "Action": ["ssm:GetParameter"],
-                "Resource": f"arn:aws:ssm:{region}:{account_id}:parameter{token_param}",
-            },
-        ],
-    }
-
-
 def ensure_role(rig: Rig) -> str:
-    iam = rig.session.client("iam")
-    names = resource_names(rig.cfg)
     account_id = rig.session.client("sts").get_caller_identity()["Account"]
-    try:
-        iam.create_role(
-            RoleName=names["role"],
-            AssumeRolePolicyDocument=json.dumps(EC2_TRUST_POLICY),
-            Description="ComfyUI video rig instance role",
-        )
-        print(f"created role: {names['role']}")
-    except iam.exceptions.EntityAlreadyExistsException:
-        print(f"role exists: {names['role']}")
-    iam.attach_role_policy(RoleName=names["role"], PolicyArn=SSM_MANAGED_POLICY)
-    iam.put_role_policy(
-        RoleName=names["role"],
-        PolicyName=INLINE_POLICY_NAME,
-        PolicyDocument=json.dumps(instance_policy(rig.cfg, account_id)),
-    )
-    try:
-        iam.create_instance_profile(InstanceProfileName=names["profile"])
-        print(f"created instance profile: {names['profile']}")
-    except iam.exceptions.EntityAlreadyExistsException:
-        print(f"instance profile exists: {names['profile']}")
-    attached = iam.get_instance_profile(InstanceProfileName=names["profile"])
-    if not attached["InstanceProfile"]["Roles"]:
-        iam.add_role_to_instance_profile(InstanceProfileName=names["profile"], RoleName=names["role"])
-    return names["profile"]
+    return ensure_instance_role(rig.session.client("iam"), rig.cfg, account_id)
 
 
 def resolve_vpc_and_subnet(ec2, cfg: dict) -> tuple[str, str]:
@@ -312,7 +240,14 @@ def store_hf_token(rig: Rig, token: str) -> None:
     ssm = rig.session.client("ssm")
     param = resource_names(rig.cfg)["hf_token_param"]
     if token:
-        ssm.put_parameter(Name=param, Value=token, Type="SecureString", Overwrite=True)
+        exists, problem = parameter_state(ssm, rig.cfg)
+        if problem:
+            raise refuse(problem)
+        if exists:
+            ssm.put_parameter(Name=param, Value=token, Type="SecureString", Overwrite=True)
+        else:
+            tags = tag_pairs(ownership_tags(rig.cfg, param))
+            ssm.put_parameter(Name=param, Value=token, Type="SecureString", Tags=tags)
         print(f"HF token stored in SSM parameter {param}")
         return
     try:
@@ -648,23 +583,12 @@ def delete_security_group(ec2, sg_id: str, sleep=time.sleep) -> bool:
 def cmd_deprovision(rig: Rig) -> None:
     if find_rig_instance(rig):
         raise SystemExit("terminate the instance first: python3 launch_rig.py terminate")
-    names = resource_names(rig.cfg)
-    iam = rig.session.client("iam")
     ec2 = rig.session.client("ec2")
-    ssm = rig.session.client("ssm")
-    steps = [
-        ("role from instance profile", iam.remove_role_from_instance_profile,
-         {"InstanceProfileName": names["profile"], "RoleName": names["role"]}),
-        (f"instance profile {names['profile']}", iam.delete_instance_profile,
-         {"InstanceProfileName": names["profile"]}),
-        (f"inline policy {INLINE_POLICY_NAME}", iam.delete_role_policy,
-         {"RoleName": names["role"], "PolicyName": INLINE_POLICY_NAME}),
-        ("SSM managed policy attachment", iam.detach_role_policy,
-         {"RoleName": names["role"], "PolicyArn": SSM_MANAGED_POLICY}),
-        (f"role {names['role']}", iam.delete_role, {"RoleName": names["role"]}),
-        (f"HF token parameter {names['hf_token_param']}", ssm.delete_parameter, {"Name": names["hf_token_param"]}),
-    ]  # fmt: skip
+    steps, refusals = cleanup_plan(rig.session.client("iam"), rig.session.client("ssm"), rig.cfg)
+    for problem in refusals:
+        print(f"kept {problem}; it may belong to another deployment with the same rig.name")
     results = [cleanup_step(label, call, **kwargs) for label, call, kwargs in steps]
+    results += [False for _ in refusals]
     results += [delete_security_group(ec2, sg_id) for sg_id in sorted(find_rig_security_groups(rig, ec2))]
     print(f"kept bucket s3://{rig.cfg['s3']['outputs_bucket']} (delete manually if done)")
     if not all(results):

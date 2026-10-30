@@ -14,6 +14,8 @@ from pathlib import Path
 
 from botocore.exceptions import ClientError
 
+from rig_iam import EC2_TRUST_POLICY, ownership_tags, resource_names, tag_pairs
+
 REDACTED = "<redacted>"
 INDENT = "    "
 INLINE_JSON_LIMIT = 100
@@ -154,7 +156,14 @@ def placeholder_responses(cfg: dict, *, resources_exist: bool, instance_exists: 
     exist or none do, with or without the rig instance."""
     region = cfg["aws"]["region"]
     ami_parameter = cfg["rig"]["ami_ssm_parameter"]
-    role = f"{cfg['rig']['name']}-role"
+    names = resource_names(cfg)
+    role, profile, param = names["role"], names["profile"], names["hf_token_param"]
+    owned_role = {
+        "RoleName": role,
+        "Tags": tag_pairs(ownership_tags(cfg, role)),
+        "AssumeRolePolicyDocument": EC2_TRUST_POLICY,
+    }
+    owned_profile = {"Roles": [{"RoleName": role}], "Tags": tag_pairs(ownership_tags(cfg, profile))}
 
     def get_parameter(**kwargs):
         if kwargs.get("Name") == ami_parameter:
@@ -164,7 +173,13 @@ def placeholder_responses(cfg: dict, *, resources_exist: bool, instance_exists: 
     return {
         "s3.head_bucket": {} if resources_exist else placeholder_error("404", "HeadBucket"),
         "sts.get_caller_identity": {"Account": "<ACCOUNT_ID>"},
-        "iam.get_instance_profile": {"InstanceProfile": {"Roles": [{"RoleName": role}] if resources_exist else []}},
+        "iam.get_role": {"Role": owned_role} if resources_exist else placeholder_error("NoSuchEntity", "GetRole"),
+        "iam.get_instance_profile": {"InstanceProfile": owned_profile}
+        if resources_exist
+        else placeholder_error("NoSuchEntity", "GetInstanceProfile"),
+        "ssm.list_tags_for_resource": {"TagList": tag_pairs(ownership_tags(cfg, param))}
+        if resources_exist
+        else placeholder_error("InvalidResourceId", "ListTagsForResource"),
         "ec2.describe_vpcs": {"Vpcs": [{"VpcId": "vpc-<default>"}]},
         "ec2.describe_subnets": {
             "Subnets": [{"SubnetId": "subnet-<first>", "VpcId": "vpc-<default>", "AvailabilityZone": f"{region}a"}]
