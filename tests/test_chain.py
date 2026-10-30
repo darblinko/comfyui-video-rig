@@ -177,6 +177,10 @@ def test_concat_list_uses_absolute_paths(tmp_path):
     assert concat_list([tmp_path / "a.mp4"]) == f"file '{tmp_path / 'a.mp4'}'\n"
 
 
+def test_concat_list_escapes_apostrophes():
+    assert concat_list([Path("/tmp/author's-repo/a.mp4")]) == "file '/tmp/author'\\''s-repo/a.mp4'\n"
+
+
 def test_voiceover_is_padded_so_the_video_sets_the_length():
     mux = mux_command(Path("v.mp4"), Path("vo.mp3"), Path("o.mp4"), 20.25)
     assert mux[mux.index("-af") + 1] == "apad=whole_dur=20.250000"

@@ -134,3 +134,10 @@ def test_short_voiceover_keeps_the_whole_video(tmp_path):
     subprocess.run(compare_command(parts[0], parts[1], compare, voiceover, 5.0625), check=True, timeout=60)
     assert decoded_frames(compare) == 81
 
+
+def test_join_works_from_a_directory_with_an_apostrophe(tmp_path):
+    folder = tmp_path / "author's-repo"
+    folder.mkdir()
+    parts = [make_segment(folder / f"s{i}.mp4", 17, 16) for i in range(1, 3)]
+    joined = build_model_clips("wan22", parts, folder, None, 1, subprocess.run)
+    assert decoded_frames(joined) == 2 * 17

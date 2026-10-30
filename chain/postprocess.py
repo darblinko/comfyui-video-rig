@@ -39,8 +39,12 @@ def ffmpeg_command(*args: str) -> list[str]:
 
 def concat_list(parts: list[Path]) -> str:
     """Input list for ffmpeg's concat demuxer; absolute paths so the list file
-    can live anywhere."""
-    return "".join(f"file '{part.resolve()}'\n" for part in parts)
+    can live anywhere. Inside single quotes an apostrophe is written '\\''."""
+    return "".join(f"file '{concat_quote(part.resolve())}'\n" for part in parts)
+
+
+def concat_quote(path: Path) -> str:
+    return str(path).replace("'", "'\\''")
 
 
 def concat_command(list_file: Path, out: Path) -> list[str]:
