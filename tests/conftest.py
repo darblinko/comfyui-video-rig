@@ -1,5 +1,9 @@
 """Shared stubs. No test makes an AWS call or a network call. Only
-test_media_ffmpeg.py runs ffmpeg, and it is skipped when ffmpeg is absent."""
+test_media_ffmpeg.py runs ffmpeg, and it is skipped when ffmpeg is absent.
+
+Every test runs with placeholder AWS credentials, no AWS config or credentials
+file and EC2 instance metadata disabled, so a test that creates a real boto3
+client never reads the developer's credentials or probes the metadata endpoint."""
 
 from __future__ import annotations
 
@@ -81,6 +85,21 @@ class FakeSession:
     def kwargs_of(self, operation: str) -> list[dict]:
         """Arguments of each call to operation; positional ones are keyed arg0, arg1 and so on."""
         return [kwargs for name, kwargs in self.calls if name == operation]
+
+
+AWS_ENV_TO_CLEAR = ("AWS_PROFILE", "AWS_DEFAULT_PROFILE", "AWS_SESSION_TOKEN", "AWS_ROLE_ARN", "AWS_WEB_IDENTITY_TOKEN_FILE")
+AWS_ENV_TO_CLEAR += ("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "AWS_CONTAINER_CREDENTIALS_FULL_URI")
+
+
+@pytest.fixture(autouse=True)
+def isolated_aws_env(monkeypatch, tmp_path):
+    for name in AWS_ENV_TO_CLEAR:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
+    monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
+    monkeypatch.setenv("AWS_CONFIG_FILE", str(tmp_path / "no-aws-config"))
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(tmp_path / "no-aws-credentials"))
 
 
 @pytest.fixture

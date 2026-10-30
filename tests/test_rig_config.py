@@ -49,10 +49,8 @@ def test_overrides_return_a_new_dict():
     "make_session",
     [lambda: aws_session("us-west-2"), lambda: launch_rig.aws_session({"aws": {"region": "us-west-2"}})],
 )
-def test_an_empty_aws_profile_falls_back_to_the_default_chain(make_session, monkeypatch, tmp_path):
+def test_an_empty_aws_profile_falls_back_to_the_default_chain(make_session, monkeypatch):
     monkeypatch.setenv("AWS_PROFILE", "")
-    monkeypatch.setenv("AWS_CONFIG_FILE", str(tmp_path / "missing-config"))
-    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(tmp_path / "missing-credentials"))
     make_session().client("s3")
     assert "AWS_PROFILE" not in os.environ
 
