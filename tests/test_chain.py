@@ -20,7 +20,6 @@ from run_chain import (
     last_frame_command,
     load_spec,
     record_segment,
-    run_folder_from_output,
     segment_start_image,
     segment_toml,
 )
@@ -70,28 +69,46 @@ def test_last_frame_command_seeks_from_the_end():
     assert cmd[-3:] == ["-update", "1", "last.png"]
 
 
-def test_run_folder_is_the_last_one_printed():
-    stdout = "=== wan22: queueing\nrun folder: /a/outputs/one\nother\nrun folder: /a/outputs/two\n"
-    assert run_folder_from_output(stdout) == Path("/a/outputs/two")
-    assert run_folder_from_output("no folder here") is None
+def write_result(path: Path, run_dir: Path, results: list[dict]) -> None:
+    path.write_text(json.dumps({"run_dir": str(run_dir), "results": results, "errors": []}))
 
 
-def test_run_segment_writes_the_job_and_returns_the_newest_raw_clip(spec, tmp_path):
+def test_run_segment_writes_the_job_and_returns_the_video_named_in_the_result(spec, tmp_path):
     spec = {**spec, "spec_dir": tmp_path}
     run_folder = tmp_path / "outputs" / "20260711-150000-wan22_seg1"
-    (run_folder / "wan22").mkdir(parents=True)
-    for name in ("wan22_00001_.mp4", "wan22_00002_.mp4"):
-        (run_folder / "wan22" / name).write_bytes(b"v")
     commands = []
 
     def fake_run(cmd, **_kwargs):
         commands.append(cmd)
-        return subprocess.CompletedProcess(cmd, 0, stdout=f"run folder: {run_folder}\n", stderr="")
+        result_file = Path(cmd[cmd.index("--result-file") + 1])
+        write_result(result_file, run_folder, [{"label": "wan22", "video": "wan22/wan22_00001_.mp4"}])
+        return subprocess.CompletedProcess(cmd, 0, stdout="log line\n", stderr="")
 
-    raw = run_chain.run_segment(spec, "wan22", 1, run=fake_run)
-    assert raw.name == "wan22_00002_.mp4"
+    raw = run_chain.run_segment(spec, "wan22", 1, run=fake_run, repo_dir=tmp_path)
+    assert raw == run_folder / "wan22" / "wan22_00001_.mp4"
     assert (tmp_path / "generated" / "wan22_seg1.toml").read_text() == segment_toml(spec, "wan22", 1)
     assert commands[0][1:4] == ["runner/run_job.py", str(tmp_path / "generated" / "wan22_seg1.toml"), "--no-sync"]
+
+
+def test_run_segment_ignores_a_stale_result_file(spec, tmp_path):
+    spec = {**spec, "spec_dir": tmp_path}
+    stale = tmp_path / "outputs" / spec["name"] / "wan22_seg1_result.json"
+    stale.parent.mkdir(parents=True)
+    write_result(stale, tmp_path, [{"label": "wan22", "video": "old.mp4"}])
+    ok = lambda cmd, **_k: subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")  # noqa: E731
+    with pytest.raises(RuntimeError, match="wrote no result file"):
+        run_chain.run_segment(spec, "wan22", 1, run=ok, repo_dir=tmp_path)
+
+
+def test_run_segment_needs_a_video_for_the_model(spec, tmp_path):
+    spec = {**spec, "spec_dir": tmp_path}
+
+    def fake_run(cmd, **_kwargs):
+        write_result(Path(cmd[cmd.index("--result-file") + 1]), tmp_path, [{"label": "wan22", "video": None}])
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    with pytest.raises(RuntimeError, match="no video output"):
+        run_chain.run_segment(spec, "wan22", 1, run=fake_run, repo_dir=tmp_path)
 
 
 def test_failed_segment_stops_the_chain(spec, tmp_path):

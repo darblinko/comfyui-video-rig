@@ -237,6 +237,7 @@ def execute_run(client: ComfyClient, run: dict, job: dict, uploads: dict, out_di
         "frames": effective_frames(workflow),
         "elapsed_s": elapsed,
         "files": [str(f.relative_to(out_dir)) for f in files],
+        "video": str(videos[0].relative_to(out_dir)) if videos else None,
         "final": str(final.relative_to(out_dir)) if final else None,
     }
 
@@ -300,6 +301,9 @@ def run_job(args: argparse.Namespace, job: dict, runs: list[dict]) -> int:
     compare = build_side_by_side(finals, out_dir / "compare_side_by_side.mp4")
     write_manifest(out_dir, run_id, args.job_file, job, results, errors, compare, comfyui)
     print(f"\nrun folder: {out_dir}")
+    if args.result_file:
+        result = {"run_dir": str(out_dir), "results": results, "errors": errors}
+        args.result_file.write_text(json.dumps(result, indent=2) + "\n")
 
     if not args.no_sync and results:
         sync_and_print_links(out_dir)
@@ -390,6 +394,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--port", type=int, help="ComfyUI port (default: comfyui_port in rig.config.toml)")
     parser.add_argument("--timeout", type=int, default=3600, help="per-run seconds")
     parser.add_argument("--no-sync", action="store_true", help="skip S3 upload")
+    parser.add_argument(
+        "--result-file",
+        type=Path,
+        help="also write the run folder and the per-model results (as in the manifest) to this JSON file",
+    )
     parser.add_argument(
         "--allow-partial",
         action="store_true",

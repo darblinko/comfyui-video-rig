@@ -261,3 +261,18 @@ def test_dry_run_prints_the_plan_and_writes_nothing(sandbox, capsys, monkeypatch
 
 def _toml(job: dict) -> str:
     return "".join(f"{key} = {json.dumps(value)}\n" for key, value in job.items())
+
+
+def test_result_file_names_the_run_folder_and_each_video(sandbox):
+    root, _commands = sandbox
+    result_file = root / "result.json"
+    argv = [str(write_job(root, _toml(BAKEOFF_JOB))), "--no-sync", "--port", "8188", "--result-file", str(result_file)]
+    args = run_job.parse_args(argv)
+    job = load_job(args.job_file)
+    assert run_job.run_job(args, job, run_job.plan_runs(job, None)) == 0
+    result = json.loads(result_file.read_text())
+    (run_dir,) = (root / "outputs").iterdir()
+    assert result["run_dir"] == str(run_dir)
+    videos = {r["label"]: r["video"] for r in result["results"]}
+    assert all((run_dir / video).exists() for video in videos.values())
+    assert set(videos) == {"wan22", "hunyuan15"}

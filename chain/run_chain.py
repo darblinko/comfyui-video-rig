@@ -10,8 +10,9 @@ comparison stays like for like.
     python3 -u chain/run_chain.py jobs/headphones_test/chain.toml [--model wan22] [--start-seg 2]
 
 Each segment is an ordinary run_job.py job: its TOML is written to
-<spec dir>/generated/, and the extracted last frames and chain_state.json go to
-outputs/<name>/. ffmpeg must be on PATH.
+<spec dir>/generated/, and the extracted last frames, chain_state.json and
+each segment's run_job.py result file (run folder and video output, read in
+place of its console output) go to outputs/<name>/. ffmpeg must be on PATH.
 
 Starting or resuming at segment n drops that model's records for segment n
 and later from chain_state.json, so the state never mixes generations.
@@ -85,7 +86,7 @@ def segment_toml(spec: dict, model: str, seg: int) -> str:
     )
 
 
-def run_job_command(job_toml: Path) -> list[str]:
+def run_job_command(job_toml: Path, result_file: Path) -> list[str]:
     return [
         sys.executable,
         "runner/run_job.py",
@@ -93,6 +94,8 @@ def run_job_command(job_toml: Path) -> list[str]:
         "--no-sync",
         "--timeout",
         str(SEGMENT_TIMEOUT_S),
+        "--result-file",
+        str(result_file),
     ]
 
 
@@ -102,13 +105,18 @@ def last_frame_command(video: Path, out_png: Path) -> list[str]:
     return ["ffmpeg", "-y", "-loglevel", "error", "-sseof", "-0.5", "-i", str(video), "-update", "1", str(out_png)]
 
 
-def run_folder_from_output(stdout: str) -> Path | None:
-    prefix = "run folder: "
-    folders = [line.removeprefix(prefix).strip() for line in stdout.splitlines() if line.startswith(prefix)]
-    return Path(folders[-1]) if folders else None
+def segment_video(result_file: Path, model: str, seg: int) -> Path:
+    """The raw clip run_job.py recorded for this model in its result file."""
+    if not result_file.exists():
+        raise RuntimeError(f"{model} segment {seg}: run_job.py wrote no result file")
+    result = json.loads(result_file.read_text())
+    video = next((r.get("video") for r in result["results"] if r["label"] == model), None)
+    if not video:
+        raise RuntimeError(f"{model} segment {seg}: no video output in {result['run_dir']}")
+    return Path(result["run_dir"]) / video
 
 
-def run_segment(spec: dict, model: str, seg: int, run=subprocess.run) -> Path:
+def run_segment(spec: dict, model: str, seg: int, run=subprocess.run, repo_dir: Path = REPO_DIR) -> Path:
     """Write the segment job, run it through run_job.py and return its raw clip."""
     generated = spec["spec_dir"] / "generated"
     generated.mkdir(parents=True, exist_ok=True)
@@ -116,18 +124,15 @@ def run_segment(spec: dict, model: str, seg: int, run=subprocess.run) -> Path:
     job_toml.write_text(segment_toml(spec, model, seg))
     print(f"=== chain: {model} segment {seg}/{len(spec['beats'])}", flush=True)
 
-    proc = run(run_job_command(job_toml), cwd=REPO_DIR, capture_output=True, text=True)
+    result_file = stage_dir(spec, repo_dir) / f"{model}_seg{seg}_result.json"
+    result_file.parent.mkdir(parents=True, exist_ok=True)
+    result_file.unlink(missing_ok=True)
+    proc = run(run_job_command(job_toml, result_file), cwd=repo_dir, capture_output=True, text=True)
     print(proc.stdout, flush=True)
     if proc.returncode != 0:
         print(proc.stderr, flush=True)
         raise RuntimeError(f"{model} segment {seg} failed (exit {proc.returncode})")
-    run_folder = run_folder_from_output(proc.stdout)
-    if run_folder is None:
-        raise RuntimeError(f"{model} segment {seg}: run_job.py printed no run folder")
-    raws = sorted((run_folder / model).glob("*.mp4"))
-    if not raws:
-        raise RuntimeError(f"{model} segment {seg}: no raw mp4 in {run_folder / model}")
-    return raws[-1]
+    return segment_video(result_file, model, seg)
 
 
 def extract_last_frame(video: Path, out_png: Path, run=subprocess.run) -> None:
