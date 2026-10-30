@@ -7,10 +7,12 @@ kill the whole bootstrap; exits non-zero only if every requested file failed.
 
 Each manifest entry may pin "revision" (a commit SHA) and "sha256". The
 expected size, the LFS sha256 and the resolved commit come from the Hub's file
-metadata at that revision. A cached file is kept only if its size matches (and
-its sha256, when pinned); otherwise it is downloaded again. A download is moved
-into place only after its size and sha256 check out. The resolved revision,
-size and sha256 of every file are written to <dest>/models.lock.json.
+metadata at that revision, and the file is fetched at that resolved commit. A
+cached file is kept only if its size and its sha256 (the pinned one, else the
+Hub's) match; a cached file with no sha256 to compare against (a non-LFS file)
+is downloaded again. A download is moved into place only after its size and
+sha256 check out. The resolved commit, size and sha256 of the bytes in place
+are written to <dest>/models.lock.json.
 """
 
 from __future__ import annotations
@@ -65,31 +67,32 @@ def download_file(entry: dict, dest_root: Path, staging: Path, fetch=None, metad
     metadata = metadata or remote_metadata
     dest_path = dest_root / entry["dest"] / Path(entry["path"]).name
     meta = metadata(entry)
-    pinned_sha = entry.get("sha256")
+    expected_sha = entry.get("sha256") or meta["sha256"]
     record = {
         "repo": entry["repo"],
         "path": entry["path"],
         "revision": meta["commit"],
         "size": meta["size"],
-        "sha256": pinned_sha or meta["sha256"],
+        "sha256": expected_sha,
     }
     if dest_path.exists():
-        problem = verification_error(dest_path, meta["size"], pinned_sha)
+        problem = "no sha256 to verify against" if expected_sha is None else None
+        problem = problem or verification_error(dest_path, meta["size"], expected_sha)
         if problem is None:
-            print(f"exists, verified by {'sha256' if pinned_sha else 'size'}: {dest_path}")
+            print(f"exists, verified by sha256: {dest_path}")
             return record
-        print(f"cached file failed verification ({problem}), downloading again: {dest_path}")
+        print(f"cached file not verified ({problem}), downloading again: {dest_path}")
         dest_path.unlink()
-    print(f"downloading {entry['repo']} :: {entry['path']}")
-    downloaded = Path(fetch(entry["repo"], entry["path"], staging, revision=entry.get("revision")))
-    problem = verification_error(downloaded, meta["size"], record["sha256"])
+    print(f"downloading {entry['repo']} :: {entry['path']} at {meta['commit']}")
+    downloaded = Path(fetch(entry["repo"], entry["path"], staging, revision=meta["commit"]))
+    problem = verification_error(downloaded, meta["size"], expected_sha)
     if problem is not None:
         downloaded.unlink(missing_ok=True)
         raise RuntimeError(f"download failed verification: {problem}")
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(downloaded, dest_path)
     print(f"  saved {dest_path}")
-    return record
+    return {**record, "sha256": expected_sha or file_sha256(dest_path)}
 
 
 def download_groups(manifest: dict, groups: list[str], dest: Path) -> tuple[dict, list[str]]:

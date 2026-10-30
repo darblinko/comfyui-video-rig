@@ -56,12 +56,38 @@ def test_pinned_revision_is_passed_to_the_fetch(tmp_path):
     assert hub.fetches[0]["revision"] == COMMIT
 
 
-def test_cached_file_of_the_right_size_is_not_downloaded_again(tmp_path):
+def test_cached_file_matching_the_remote_sha256_is_not_downloaded_again(tmp_path):
     (tmp_path / "vae").mkdir()
     (tmp_path / "vae" / "vae.safetensors").write_bytes(GOOD)
     hub = FakeHub()
     run_download(hub, tmp_path)
     assert hub.fetches == []
+
+
+def test_same_size_cached_file_not_matching_the_remote_sha256_is_downloaded_again(tmp_path):
+    (tmp_path / "vae").mkdir()
+    (tmp_path / "vae" / "vae.safetensors").write_bytes(b"x" * len(GOOD))
+    hub = FakeHub()
+    record = run_download(hub, tmp_path)
+    assert len(hub.fetches) == 1
+    assert (tmp_path / "vae" / "vae.safetensors").read_bytes() == GOOD
+    assert record["sha256"] == GOOD_SHA
+
+
+def test_cached_file_without_a_remote_sha256_is_downloaded_again(tmp_path):
+    (tmp_path / "vae").mkdir()
+    (tmp_path / "vae" / "vae.safetensors").write_bytes(b"x" * len(GOOD))
+    hub = FakeHub(sha256=None)
+    record = run_download(hub, tmp_path)
+    assert len(hub.fetches) == 1
+    assert record["sha256"] == GOOD_SHA
+
+
+def test_fetch_uses_the_resolved_commit_of_the_metadata(tmp_path):
+    hub = FakeHub()
+    record = run_download(hub, tmp_path)
+    assert hub.fetches[0]["revision"] == COMMIT
+    assert record["revision"] == COMMIT
 
 
 def test_truncated_cached_file_is_downloaded_again(tmp_path, capsys):
@@ -71,7 +97,7 @@ def test_truncated_cached_file_is_downloaded_again(tmp_path, capsys):
     run_download(hub, tmp_path)
     assert len(hub.fetches) == 1
     assert (tmp_path / "vae" / "vae.safetensors").read_bytes() == GOOD
-    assert "failed verification" in capsys.readouterr().out
+    assert "not verified" in capsys.readouterr().out
 
 
 def test_cached_file_that_does_not_match_a_pinned_sha256_is_downloaded_again(tmp_path):
