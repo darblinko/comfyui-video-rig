@@ -130,11 +130,13 @@ class ComfyClient:
         raise ComfyError(f"timed out after {timeout_s}s waiting for prompt {prompt_id} (cancellation sent)")
 
     def upload_image(self, path: Path) -> str:
-        """Upload an input image; returns the server-side filename to reference."""
+        """Upload an input image under a unique name; returns the server-side
+        path to reference, so two inputs with the same basename never collide."""
+        name = f"{uuid.uuid4().hex[:12]}_{path.name}"
         boundary = uuid.uuid4().hex
         parts = [
             f"--{boundary}\r\n".encode(),
-            (f'Content-Disposition: form-data; name="image"; filename="{path.name}"\r\n').encode(),
+            (f'Content-Disposition: form-data; name="image"; filename="{name}"\r\n').encode(),
             b"Content-Type: application/octet-stream\r\n\r\n",
             path.read_bytes(),
             f"\r\n--{boundary}\r\n".encode(),
@@ -147,7 +149,8 @@ class ComfyClient:
             headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
         )
         data = self._request(req, f"upload of {path.name} failed", json.load)
-        return data["name"]
+        subfolder = data.get("subfolder") or ""
+        return f"{subfolder}/{data['name']}" if subfolder else data["name"]
 
     def download_output(self, file_info: dict, dest_dir: Path) -> Path:
         """Stream one output to dest_dir. The body goes to a .part file that is

@@ -259,14 +259,14 @@ def display(value) -> str:
 
 
 def plan_uploads(job: dict, repo_dir: Path = REPO_DIR) -> dict:
-    """Print the reference uploads; return the names a real upload would normally get."""
+    """Print the reference uploads; return placeholders for the unique names a real upload gets."""
     uploads = {}
     for key in REFERENCE_KEYS:
         if key not in job:
             continue
         note = "" if (repo_dir / job[key]).exists() else "  (file missing: a real run stops here)"
         print(f"POST /upload/image  {key} = {job[key]}{note}")
-        uploads[key] = Path(job[key]).name
+        uploads[key] = f"<unique id>_{Path(job[key]).name}"
     return uploads
 
 

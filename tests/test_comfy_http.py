@@ -163,3 +163,22 @@ def test_cancel_of_the_running_prompt_interrupts_only_that_prompt(server, client
     server.queue = {"queue_running": [[1, "p1", {}, {}, []]], "queue_pending": []}
     client.cancel("p1")
     assert server.posts_to("/interrupt") == [{"prompt_id": "p1"}]
+
+
+def test_uploads_with_the_same_basename_get_distinct_server_names(server, client, tmp_path):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    start, mask = tmp_path / "a" / "frame.png", tmp_path / "b" / "frame.png"
+    start.write_bytes(b"start")
+    mask.write_bytes(b"mask")
+    names = [client.upload_image(start), client.upload_image(mask)]
+    assert names[0] != names[1]
+    assert server.uploads == names
+    assert all(name.endswith("frame.png") for name in names)
+
+
+def test_upload_returns_the_server_subfolder_path(server, client, tmp_path):
+    image = tmp_path / "frame.png"
+    image.write_bytes(b"png")
+    server.upload_subfolder = "rig"
+    assert client.upload_image(image) == f"rig/{server.uploads[-1]}"
