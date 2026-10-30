@@ -1,5 +1,5 @@
 {
-  "_note": "HunyuanVideo 1.5 720p image-to-video (ComfyUI API format), mirrored 2026-07-11 from the official template 'video_hunyuan_video_1.5_720p_i2v' with the bypassed EasyCache node and the optional 1080p super-resolution stage omitted. Per the template, BasicScheduler intentionally takes the unshifted model while CFGGuider takes the ModelSamplingSD3 output. Keys starting with '_' are stripped before submission. Injection targets the RIG_* titles; see workflows/README.md.",
+  "_note": "HunyuanVideo 1.5 720p image-to-video (ComfyUI API format), mirrored 2026-07-11 from the official template 'video_hunyuan_video_1.5_720p_i2v' with the bypassed EasyCache node and the optional 1080p super-resolution stage omitted. Per the template, BasicScheduler intentionally takes the unshifted model while CFGGuider takes the ModelSamplingSD3 output. Keys starting with '_' are stripped before submission. Injection targets the RIG_* titles; see workflows/README.md. Adapted from Comfy-Org/workflow_templates (MIT License, Copyright (c) 2023-present Comfy Org); see THIRD_PARTY_NOTICES.md.",
   "1": {
     "class_type": "UNETLoader",
     "inputs": {

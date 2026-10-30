@@ -40,6 +40,6 @@ as the relevant nodes carry these titles. Top-level JSON keys starting with
 - `flux_persona_ref.json`: persona reference stills for a synthetic presenter persona
 - `flux_start_frame.json`: harmonizes a product paste-up into a photoreal start frame (mask protects the product pixels)
 - `wan22_i2v.json`: Wan 2.2 A14B image-to-video, two-stage high/low-noise sampling
-- `hunyuan15_i2v.json`: HunyuanVideo 1.5 720p image-to-video, mirrored from the
+- `hunyuan15_i2v.json`: HunyuanVideo 1.5 720p image-to-video, adapted (MIT License, see `THIRD_PARTY_NOTICES.md`) from the
   official `video_hunyuan_video_1.5_720p_i2v` template (EasyCache and the 1080p
   super-resolution stage omitted; CFGGuider cfg 6, shift 7, euler/simple 20 steps)
