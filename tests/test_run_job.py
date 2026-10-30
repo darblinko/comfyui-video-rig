@@ -57,7 +57,7 @@ def test_plan_rejects_unknown_models_in_the_filter():
 
 
 def test_plan_rejects_models_whose_workflow_is_missing(tmp_path):
-    with pytest.raises(SystemExit, match="wan22_i2v.json not found"):
+    with pytest.raises(SystemExit, match=r"wan22_i2v\.json not found"):
         plan_runs(BAKEOFF_JOB, None, repo_dir=tmp_path)
 
 

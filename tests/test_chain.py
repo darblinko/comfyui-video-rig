@@ -11,8 +11,8 @@ from postprocess import (
     build_model_clips,
     compare_command,
     concat_list,
-    mux_command,
     duration_command,
+    mux_command,
     parse_progress_duration,
     segments_by_model,
 )
@@ -20,8 +20,8 @@ from run_chain import (
     last_frame_command,
     load_spec,
     record_segment,
-    segment_start_image,
     segment_digest,
+    segment_start_image,
     segment_toml,
 )
 
