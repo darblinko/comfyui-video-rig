@@ -1,0 +1,18 @@
+# Bake-off: Wan 2.2 vs HunyuanVideo 1.5, same start frame + seed through both
+# (interview decision 7). Produces final_wan22.mp4, final_hunyuan15.mp4 and
+# compare_side_by_side.mp4 in one run folder.
+#
+# Run: python3 runner/run_job.py jobs/live_test/bakeoff_shaker.toml
+
+job_type = "product_demo_video"
+persona_id = "presenter_kitchen_v1"
+models = ["wan22", "hunyuan15"]
+
+start_image = "outputs/live_test/frame_shaker.png"
+
+prompt = """photorealistic woman with shoulder-length auburn hair holding a matte black protein shaker bottle in a bright modern kitchen, she lifts the bottle slightly and tilts it toward the camera while talking, natural window lighting, realistic hand-object interaction, subtle camera push-in"""
+negative_prompt = "deformed hands, extra fingers, fused fingers, warped face, plastic skin, flickering, morphing, distorted text, watermark"
+
+duration_seconds = 5
+resolution = [720, 1280]
+seed = 123456

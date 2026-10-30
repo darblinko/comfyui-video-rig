@@ -1,0 +1,67 @@
+{
+  "_note": "FLUX.1-dev fp8 start-frame harmonizer (ComfyUI API format). Input is a rough paste-up (real product photo composited onto a persona scene) plus a mask; low-denoise img2img blends lighting and edges while the masked-out product pixels stay untouched. Mask convention: WHITE = regenerate (background/persona edges), BLACK = protect (the product). See the main README for the paste-up step.",
+  "1": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": { "ckpt_name": "flux1-dev-fp8.safetensors" },
+    "_meta": { "title": "Load FLUX Checkpoint" }
+  },
+  "2": {
+    "class_type": "LoadImage",
+    "inputs": { "image": "pasteup.png" },
+    "_meta": { "title": "RIG_START_IMAGE" }
+  },
+  "3": {
+    "class_type": "LoadImageMask",
+    "inputs": { "image": "pasteup_mask.png", "channel": "red" },
+    "_meta": { "title": "RIG_MASK" }
+  },
+  "4": {
+    "class_type": "VAEEncode",
+    "inputs": { "pixels": ["2", 0], "vae": ["1", 2] },
+    "_meta": { "title": "Encode" }
+  },
+  "5": {
+    "class_type": "SetLatentNoiseMask",
+    "inputs": { "samples": ["4", 0], "mask": ["3", 0] },
+    "_meta": { "title": "Mask Denoise Region" }
+  },
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": ["1", 1],
+      "text": "photorealistic woman holding a product in a bright modern kitchen, natural window lighting, seamless realistic composite, consistent shadows"
+    },
+    "_meta": { "title": "RIG_POSITIVE" }
+  },
+  "7": {
+    "class_type": "CLIPTextEncode",
+    "inputs": { "clip": ["1", 1], "text": "" },
+    "_meta": { "title": "RIG_NEGATIVE" }
+  },
+  "8": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["1", 0],
+      "seed": 123456,
+      "steps": 25,
+      "cfg": 1.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 0.35,
+      "positive": ["6", 0],
+      "negative": ["7", 0],
+      "latent_image": ["5", 0]
+    },
+    "_meta": { "title": "RIG_SAMPLER" }
+  },
+  "9": {
+    "class_type": "VAEDecode",
+    "inputs": { "samples": ["8", 0], "vae": ["1", 2] },
+    "_meta": { "title": "Decode" }
+  },
+  "10": {
+    "class_type": "SaveImage",
+    "inputs": { "images": ["9", 0], "filename_prefix": "rig/start_frame" },
+    "_meta": { "title": "RIG_OUTPUT" }
+  }
+}

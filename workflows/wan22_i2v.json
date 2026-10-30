@@ -1,0 +1,135 @@
+{
+  "_note": "Wan 2.2 A14B image-to-video starter (ComfyUI API format, high/low-noise MoE two-stage sampling). VALIDATE against the official ComfyUI Wan 2.2 template on first run - node and field names drift across ComfyUI versions. Keys starting with '_' are stripped before submission. Injection targets the RIG_* titles; see workflows/README.md.",
+  "1": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": { "title": "Load High-Noise UNet" }
+  },
+  "2": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": { "title": "Load Low-Noise UNet" }
+  },
+  "3": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "wan"
+    },
+    "_meta": { "title": "Load Text Encoder" }
+  },
+  "4": {
+    "class_type": "VAELoader",
+    "inputs": { "vae_name": "wan_2.1_vae.safetensors" },
+    "_meta": { "title": "Load VAE" }
+  },
+  "5": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": ["3", 0],
+      "text": "photorealistic young woman holding a branded product toward the camera, natural window lighting, realistic hand-object interaction, subtle camera push-in"
+    },
+    "_meta": { "title": "RIG_POSITIVE" }
+  },
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": ["3", 0],
+      "text": "deformed hands, extra fingers, warped face, plastic skin, flicker, morphing label, distorted text, watermark"
+    },
+    "_meta": { "title": "RIG_NEGATIVE" }
+  },
+  "7": {
+    "class_type": "LoadImage",
+    "inputs": { "image": "start_frame.png" },
+    "_meta": { "title": "RIG_START_IMAGE" }
+  },
+  "8": {
+    "class_type": "WanImageToVideo",
+    "inputs": {
+      "positive": ["5", 0],
+      "negative": ["6", 0],
+      "vae": ["4", 0],
+      "start_image": ["7", 0],
+      "width": 720,
+      "height": 1280,
+      "length": 81,
+      "batch_size": 1
+    },
+    "_meta": { "title": "RIG_LATENT" }
+  },
+  "9": {
+    "class_type": "ModelSamplingSD3",
+    "inputs": { "model": ["1", 0], "shift": 8.0 },
+    "_meta": { "title": "High-Noise Shift" }
+  },
+  "10": {
+    "class_type": "ModelSamplingSD3",
+    "inputs": { "model": ["2", 0], "shift": 8.0 },
+    "_meta": { "title": "Low-Noise Shift" }
+  },
+  "11": {
+    "class_type": "KSamplerAdvanced",
+    "inputs": {
+      "model": ["9", 0],
+      "add_noise": "enable",
+      "noise_seed": 123456,
+      "steps": 20,
+      "cfg": 3.5,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "positive": ["8", 0],
+      "negative": ["8", 1],
+      "latent_image": ["8", 2],
+      "start_at_step": 0,
+      "end_at_step": 10,
+      "return_with_leftover_noise": "enable"
+    },
+    "_meta": { "title": "RIG_SAMPLER" }
+  },
+  "12": {
+    "class_type": "KSamplerAdvanced",
+    "inputs": {
+      "model": ["10", 0],
+      "add_noise": "disable",
+      "noise_seed": 123456,
+      "steps": 20,
+      "cfg": 3.5,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "positive": ["8", 0],
+      "negative": ["8", 1],
+      "latent_image": ["11", 0],
+      "start_at_step": 10,
+      "end_at_step": 10000,
+      "return_with_leftover_noise": "disable"
+    },
+    "_meta": { "title": "RIG_SAMPLER_2" }
+  },
+  "13": {
+    "class_type": "VAEDecode",
+    "inputs": { "samples": ["12", 0], "vae": ["4", 0] },
+    "_meta": { "title": "Decode" }
+  },
+  "14": {
+    "class_type": "CreateVideo",
+    "inputs": { "images": ["13", 0], "fps": 16 },
+    "_meta": { "title": "RIG_VIDEO" }
+  },
+  "15": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": ["14", 0],
+      "filename_prefix": "rig/wan22",
+      "format": "mp4",
+      "codec": "h264"
+    },
+    "_meta": { "title": "RIG_OUTPUT" }
+  }
+}

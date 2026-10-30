@@ -1,0 +1,67 @@
+{
+  "flux": {
+    "note": "FLUX.1-dev fp8 all-in-one checkpoint (Comfy-Org repack, no HF gating). Used for persona reference stills and start-frame harmonization.",
+    "files": [
+      {
+        "repo": "Comfy-Org/flux1-dev",
+        "path": "flux1-dev-fp8.safetensors",
+        "dest": "checkpoints"
+      }
+    ]
+  },
+  "wan22": {
+    "note": "Wan 2.2 A14B image-to-video, fp8-scaled repack: high+low noise MoE pair, umt5 text encoder, Wan 2.1 VAE.",
+    "files": [
+      {
+        "repo": "Comfy-Org/Wan_2.2_ComfyUI_Repackaged",
+        "path": "split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
+        "dest": "diffusion_models"
+      },
+      {
+        "repo": "Comfy-Org/Wan_2.2_ComfyUI_Repackaged",
+        "path": "split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
+        "dest": "diffusion_models"
+      },
+      {
+        "repo": "Comfy-Org/Wan_2.2_ComfyUI_Repackaged",
+        "path": "split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+        "dest": "text_encoders"
+      },
+      {
+        "repo": "Comfy-Org/Wan_2.2_ComfyUI_Repackaged",
+        "path": "split_files/vae/wan_2.1_vae.safetensors",
+        "dest": "vae"
+      }
+    ]
+  },
+  "hunyuan15": {
+    "note": "HunyuanVideo 1.5 720p image-to-video. Paths verified 2026-07-11 against the official ComfyUI template 'video_hunyuan_video_1.5_720p_i2v': fp16 UNet (no plain fp8 720p i2v exists; template note says set weight_dtype to fp8_e4m3fn if OOM), dual text encoders (Qwen2.5-VL fp8 + byT5-small glyph), fp16 VAE, sigclip vision for the start-frame embed. The optional 1080p super-resolution stage models are deliberately excluded.",
+    "files": [
+      {
+        "repo": "Comfy-Org/HunyuanVideo_1.5_repackaged",
+        "path": "split_files/diffusion_models/hunyuanvideo1.5_720p_i2v_fp16.safetensors",
+        "dest": "diffusion_models"
+      },
+      {
+        "repo": "Comfy-Org/HunyuanVideo_1.5_repackaged",
+        "path": "split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+        "dest": "text_encoders"
+      },
+      {
+        "repo": "Comfy-Org/HunyuanVideo_1.5_repackaged",
+        "path": "split_files/text_encoders/byt5_small_glyphxl_fp16.safetensors",
+        "dest": "text_encoders"
+      },
+      {
+        "repo": "Comfy-Org/HunyuanVideo_1.5_repackaged",
+        "path": "split_files/vae/hunyuanvideo15_vae_fp16.safetensors",
+        "dest": "vae"
+      },
+      {
+        "repo": "Comfy-Org/HunyuanVideo_1.5_repackaged",
+        "path": "split_files/clip_vision/sigclip_vision_patch14_384.safetensors",
+        "dest": "clip_vision"
+      }
+    ]
+  }
+}

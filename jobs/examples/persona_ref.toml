@@ -1,0 +1,16 @@
+# Step 1: generate candidate reference stills for the synthetic brand persona.
+# Keep the prompt (the "character bible") IDENTICAL across runs and vary only
+# the seed. Once a look is chosen, save the winning refs + this prompt in
+# personas/presenter_kitchen_v1/ - the same description then anchors every video prompt.
+#
+# Run: python3 runner/run_job.py jobs/examples/persona_ref.toml
+
+job_type = "persona_reference"
+persona_id = "presenter_kitchen_v1"
+workflow = "workflows/flux_persona_ref.json"
+
+prompt = """studio portrait of a friendly woman in her late 20s, shoulder-length auburn hair with soft waves, hazel eyes, light freckles across the nose, warm genuine smile, cream knit sweater, standing in a bright modern kitchen with soft natural window light, photorealistic, 85mm lens, shallow depth of field"""
+negative_prompt = ""
+
+resolution = [832, 1216]
+seed = 777001

@@ -1,0 +1,15 @@
+# Live-test stand-in for the start_frame step: no real product photos are in
+# the repo yet, so generate the persona already holding a generic shaker
+# bottle at video resolution. Output feeds video_shaker.toml as its frame 0.
+#
+# Run: python3 runner/run_job.py jobs/live_test/frame_shaker.toml
+
+job_type = "start_frame"
+persona_id = "presenter_kitchen_v1"
+workflow = "workflows/flux_persona_ref.json"
+
+prompt = """photorealistic studio photo of a friendly woman in her late 20s, shoulder-length auburn hair with soft waves, hazel eyes, light freckles across the nose, warm genuine smile, cream knit sweater, holding a matte black protein shaker bottle up toward the camera with one hand, bright modern kitchen with soft natural window light, realistic grip, 85mm lens, shallow depth of field"""
+negative_prompt = "deformed hands, extra fingers, floating object, watermark, text"
+
+resolution = [720, 1280]
+seed = 777001

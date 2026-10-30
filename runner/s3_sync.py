@@ -1,0 +1,77 @@
+#!/usr/bin/env python3
+"""Upload a run folder to the outputs bucket and print presigned share links.
+
+Standalone:
+  python3 runner/s3_sync.py outputs/20260710-153000-shaker_demo
+
+Also called by run_job.py unless --no-sync is passed.
+"""
+
+from __future__ import annotations
+
+import argparse
+import mimetypes
+import os
+import tomllib
+from pathlib import Path
+
+import boto3
+
+PROTO_DIR = Path(__file__).resolve().parent.parent
+PRESIGN_TTL_S = 7 * 24 * 3600  # SigV4 maximum
+SHAREABLE_SUFFIXES = {".mp4", ".webm", ".webp", ".png", ".jpg", ".jpeg", ".json"}
+
+
+def load_aws_config(config_path: Path) -> dict:
+    with open(config_path, "rb") as fh:
+        cfg = tomllib.load(fh)
+    bucket = os.environ.get("RIG_OUTPUTS_BUCKET") or cfg["s3"]["outputs_bucket"]
+    if not bucket:
+        raise SystemExit("set RIG_OUTPUTS_BUCKET (or [s3] outputs_bucket in rig.config.toml)")
+    return {
+        "region": os.environ.get("AWS_REGION") or cfg["aws"]["region"],
+        "bucket": bucket,
+    }
+
+
+def sync_run(run_dir: Path, aws: dict, prefix: str = "runs") -> dict[str, str]:
+    """Upload every file under run_dir; returns {relative_path: presigned_url}."""
+    session = boto3.Session(region_name=aws["region"])  # AWS_PROFILE or the default chain
+    s3 = session.client("s3")
+    urls: dict[str, str] = {}
+    for path in sorted(run_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(run_dir)
+        key = f"{prefix}/{run_dir.name}/{rel}"
+        content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        s3.upload_file(
+            str(path), aws["bucket"], key, ExtraArgs={"ContentType": content_type}
+        )
+        if path.suffix.lower() in SHAREABLE_SUFFIXES:
+            urls[str(rel)] = s3.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": aws["bucket"], "Key": key},
+                ExpiresIn=PRESIGN_TTL_S,
+            )
+    return urls
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("run_dir", type=Path)
+    parser.add_argument("--config", type=Path, default=PROTO_DIR / "rig.config.toml")
+    args = parser.parse_args()
+    if not args.run_dir.is_dir():
+        raise SystemExit(f"not a directory: {args.run_dir}")
+
+    aws = load_aws_config(args.config)
+    urls = sync_run(args.run_dir, aws)
+    print(f"synced {args.run_dir.name} to s3://{aws['bucket']}/runs/{args.run_dir.name}/")
+    print("share links (up to 7 days; capped by your AWS session lifetime for SSO/assumed-role profiles):")
+    for rel, url in urls.items():
+        print(f"  {rel}\n    {url}")
+
+
+if __name__ == "__main__":
+    main()

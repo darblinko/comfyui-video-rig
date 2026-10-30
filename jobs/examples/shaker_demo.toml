@@ -1,0 +1,19 @@
+# Step 3: the bake-off. Animate the harmonized start frame with both video
+# models from the same seed and compare. Frame 0 is the product-accurate
+# composite, so labels/branding start pixel-perfect and the i2v model only has
+# to keep them stable through a short clip.
+#
+# Run: python3 runner/run_job.py jobs/examples/shaker_demo.toml
+
+job_type = "product_demo_video"
+persona_id = "presenter_kitchen_v1"
+models = ["wan22", "hunyuan15"]
+
+start_image = "outputs/start_frames/shaker_kitchen_v1.png"
+
+prompt = """photorealistic woman with shoulder-length auburn hair holding a protein shaker bottle in a bright modern kitchen, she lifts the bottle slightly and tilts it toward the camera while talking, natural window lighting, realistic hand-object interaction, product label stays sharp and legible, subtle camera push-in"""
+negative_prompt = "deformed hands, extra fingers, fused fingers, warped face, plastic skin, flickering, morphing product label, distorted text, watermark"
+
+duration_seconds = 5
+resolution = [720, 1280]   # 9:16 IG portrait
+seed = 123456

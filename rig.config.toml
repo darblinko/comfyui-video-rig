@@ -1,0 +1,45 @@
+# ComfyUI video rig configuration.
+# Every knob for the GPU rig lives here; launch_rig.py reads this file.
+# Account-specific values come from environment variables (see .env.example):
+#   AWS_PROFILE         named AWS CLI profile; unset means the default boto3 credential chain
+#   AWS_REGION          overrides [aws] region
+#   RIG_OUTPUTS_BUCKET  overrides [s3] outputs_bucket (required unless set below)
+#   RIG_OWNER_TAG       optional Owner tag added to every rig resource
+
+[aws]
+region = "us-west-2"
+
+[rig]
+name = "comfyui-video-rig"
+# 1x NVIDIA L40S 48GB. Bump to g6e.2xlarge / g6e.4xlarge for more CPU/RAM headroom.
+instance_type = "g6e.xlarge"
+# AMI resolution: an explicit ami_id wins; otherwise the SSM alias below resolves the
+# latest Deep Learning Base OSS NVIDIA Driver GPU AMI (Ubuntu 22.04) at launch time.
+ami_id = ""
+ami_ssm_parameter = "/aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-ubuntu-22.04/latest/ami-id"
+# Optional EC2 key pair name. SSM session/tunnel needs no key, so this can stay empty.
+key_name = ""
+# Empty = first subnet of the account's default VPC. Set a public subnet ID to use another VPC.
+subnet_id = ""
+# Models are large: FLUX ~17GB, Wan 2.2 A14B ~30GB, Hunyuan 1.5 ~25GB, plus torch and headroom.
+root_volume_gb = 300
+root_volume_type = "gp3"
+# The on-box watchdog stops the instance after this much continuous GPU idle (EBS persists).
+idle_stop_minutes = 30
+# Hard ceiling for one generation job: if the ComfyUI queue stays busy this long,
+# the watchdog assumes a hung job and stops the instance.
+max_job_minutes = 360
+# ComfyUI binds to 127.0.0.1 on the box; reach it with `python3 launch_rig.py tunnel`.
+comfyui_port = 8188
+
+[bootstrap]
+# Which groups from bootstrap/models.json to download at first boot.
+model_groups = ["flux", "wan22", "hunyuan15"]
+
+[s3]
+# Created by `provision`. Holds bootstrap files (bootstrap/ prefix) and run outputs (runs/ prefix).
+# Bucket names are global: leave this empty and set RIG_OUTPUTS_BUCKET to a name you own.
+outputs_bucket = ""
+
+[tags]
+Project = "comfyui-video-rig"

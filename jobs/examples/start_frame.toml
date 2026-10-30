@@ -1,0 +1,19 @@
+# Step 2: harmonize a rough paste-up (real product photo composited onto a
+# persona scene) into a photoreal start frame. The mask protects the product
+# pixels: BLACK over the product, WHITE where FLUX may repaint (edges, hands,
+# lighting). See the main README for making the paste-up with ImageMagick.
+#
+# Run: python3 runner/run_job.py jobs/examples/start_frame.toml
+
+job_type = "start_frame"
+persona_id = "presenter_kitchen_v1"
+workflow = "workflows/flux_start_frame.json"
+
+start_image = "products/pasteups/shaker_kitchen_pasteup.png"
+mask_image = "products/pasteups/shaker_kitchen_mask.png"
+
+prompt = """photorealistic woman with shoulder-length auburn hair holding a protein shaker bottle toward the camera in a bright modern kitchen, natural window lighting, realistic grip, seamless composite, consistent shadows and reflections"""
+negative_prompt = "floating object, wrong perspective, mismatched lighting, extra fingers"
+
+resolution = [720, 1280]
+seed = 777001

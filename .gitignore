@@ -1,0 +1,7 @@
+outputs/*
+!outputs/.gitkeep
+.rig_state.json
+__pycache__/
+*.pyc
+share_links.txt
+.env

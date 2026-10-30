@@ -1,0 +1,13 @@
+# Headphones test start frame: synthetic presenter persona wearing
+# fluffy cat-ear headphones, hands raised to lift them off (so clip 1 can
+# animate the removal). Camera-fixed portrait at video resolution.
+
+job_type = "start_frame"
+persona_id = "presenter_desk_v1"
+workflow = "workflows/flux_persona_ref.json"
+
+prompt = """RAW photo, candid photograph of a cute geeky young woman in her early 20s, real human, natural skin texture with visible pores, round glasses, dark messy bun with a pink dyed streak, oversized lavender hoodie, wearing fluffy pink cat-ear gaming headphones where the plush cat ears are attached to the headphone headband, glowing LED ring on the ear cup, both hands raised touching the headphones as if about to lift them off, cozy bedroom desk setup behind her with anime figurines and soft RGB glow, warm lighting, looking at the camera mid-sentence, shot on a full-frame camera, 85mm f1.8, shallow depth of field, photojournalism style"""
+negative_prompt = "anime, cartoon, illustration, drawing, painting, cgi, 3d render, doll, smooth plastic skin, deformed hands, extra fingers, watermark, text"
+
+resolution = [720, 1280]
+seed = 555001

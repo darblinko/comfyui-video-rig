@@ -1,0 +1,52 @@
+{
+  "_note": "FLUX.1-dev fp8 persona reference still generator (ComfyUI API format). Generates reference stills for a synthetic presenter persona. Keep the persona description in the job prompt identical across runs and vary only the seed to explore candidates; once a canonical look is chosen, save those refs in personas/presenter_kitchen_v1/.",
+  "1": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": { "ckpt_name": "flux1-dev-fp8.safetensors" },
+    "_meta": { "title": "Load FLUX Checkpoint" }
+  },
+  "2": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": ["1", 1],
+      "text": "studio portrait of a friendly young woman, shoulder-length auburn hair, warm smile, neutral background, photorealistic"
+    },
+    "_meta": { "title": "RIG_POSITIVE" }
+  },
+  "3": {
+    "class_type": "CLIPTextEncode",
+    "inputs": { "clip": ["1", 1], "text": "" },
+    "_meta": { "title": "RIG_NEGATIVE" }
+  },
+  "4": {
+    "class_type": "EmptySD3LatentImage",
+    "inputs": { "width": 832, "height": 1216, "batch_size": 1 },
+    "_meta": { "title": "RIG_LATENT" }
+  },
+  "5": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["1", 0],
+      "seed": 123456,
+      "steps": 25,
+      "cfg": 1.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1.0,
+      "positive": ["2", 0],
+      "negative": ["3", 0],
+      "latent_image": ["4", 0]
+    },
+    "_meta": { "title": "RIG_SAMPLER" }
+  },
+  "6": {
+    "class_type": "VAEDecode",
+    "inputs": { "samples": ["5", 0], "vae": ["1", 2] },
+    "_meta": { "title": "Decode" }
+  },
+  "7": {
+    "class_type": "SaveImage",
+    "inputs": { "images": ["6", 0], "filename_prefix": "rig/persona_ref" },
+    "_meta": { "title": "RIG_OUTPUT" }
+  }
+}

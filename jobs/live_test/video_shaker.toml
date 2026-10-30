@@ -1,0 +1,18 @@
+# Live-test video step: animate the generated stand-in frame with Wan 2.2
+# only (for both models, use bakeoff_shaker.toml). Update start_image to the
+# actual output path of frame_shaker.toml before running.
+#
+# Run: python3 runner/run_job.py jobs/live_test/video_shaker.toml
+
+job_type = "product_demo_video"
+persona_id = "presenter_kitchen_v1"
+models = ["wan22"]
+
+start_image = "outputs/live_test/frame_shaker.png"
+
+prompt = """photorealistic woman with shoulder-length auburn hair holding a matte black protein shaker bottle in a bright modern kitchen, she lifts the bottle slightly and tilts it toward the camera while talking, natural window lighting, realistic hand-object interaction, subtle camera push-in"""
+negative_prompt = "deformed hands, extra fingers, fused fingers, warped face, plastic skin, flickering, morphing, distorted text, watermark"
+
+duration_seconds = 5
+resolution = [720, 1280]
+seed = 123456
