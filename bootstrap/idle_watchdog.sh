@@ -41,7 +41,14 @@ if [ "$uptime_s" -lt "$BOOT_GRACE_SECONDS" ]; then
   exit 0
 fi
 
-util=$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits | head -1 | tr -d ' ')
+# A hung or failing nvidia-smi must not keep the box alive: the probe is
+# bounded, and a non-numeric reading ("[N/A]", an error, nothing) is treated
+# as idle, so an empty queue alone then decides and the idle limit still holds.
+util=$(timeout "${RIG_WATCHDOG_GPU_TIMEOUT_S:-30}" nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' ')
+if ! [[ "$util" =~ ^[0-9]+$ ]]; then
+  echo "GPU utilization unreadable (${util:-no output}); deciding on the ComfyUI queue alone"
+  util=0
+fi
 queue=$(curl -s --max-time 5 "http://127.0.0.1:${RIG_COMFY_PORT}/queue" | python3 -c '
 import json, sys
 d = json.load(sys.stdin)
@@ -63,7 +70,7 @@ if [ $(( busy_ticks * TICK_MINUTES )) -ge "$MAX_JOB_MINUTES" ]; then
   exit 0
 fi
 
-if [ "${util:-0}" -lt 5 ] && [ "$queue" -eq 0 ]; then
+if [ "$util" -lt 5 ] && [ "$queue" -eq 0 ]; then
   ticks=$(( $(cat "$STATE_FILE" 2>/dev/null || echo 0) + 1 ))
 else
   ticks=0

@@ -12,7 +12,7 @@ from conftest import REPO_DIR
 
 WATCHDOG = REPO_DIR / "bootstrap" / "idle_watchdog.sh"
 STUBS = {
-    "nvidia-smi": 'echo "${STUB_GPU_UTIL:-0}"',
+    "nvidia-smi": 'sleep "${STUB_GPU_DELAY_S:-0}"; echo "${STUB_GPU_UTIL-0}"',
     "curl": 'if [ -n "${STUB_QUEUE_JSON:-}" ]; then echo "$STUB_QUEUE_JSON"; else exit 7; fi',
     "shutdown": 'echo "$*" >> "$STUB_SHUTDOWN_LOG"',
 }
@@ -42,12 +42,26 @@ class Box:
             "RIG_WATCHDOG_BOOT_MARKER": str(self.boot_marker),
             "RIG_WATCHDOG_UPTIME_FILE": str(root / "uptime"),
             "STUB_SHUTDOWN_LOG": str(self.shutdown_log),
+            "RIG_WATCHDOG_GPU_TIMEOUT_S": "1",
         }
 
-    def tick(self, uptime_s: int, gpu_util: int = 0, running: int = 0, pending: int = 0, reachable: bool = True):
+    def tick(
+        self,
+        uptime_s: int,
+        gpu_util: int | str = 0,
+        running: int = 0,
+        pending: int = 0,
+        reachable: bool = True,
+        gpu_delay_s: int = 0,
+    ):
         (self.root / "uptime").write_text(f"{uptime_s}.42 1234.56\n")
         queue = {"queue_running": [[0]] * running, "queue_pending": [[0]] * pending}
-        env = {**self.env, "STUB_GPU_UTIL": str(gpu_util), "STUB_QUEUE_JSON": json.dumps(queue) if reachable else ""}
+        env = {
+            **self.env,
+            "STUB_GPU_UTIL": str(gpu_util),
+            "STUB_GPU_DELAY_S": str(gpu_delay_s),
+            "STUB_QUEUE_JSON": json.dumps(queue) if reachable else "",
+        }
         result = subprocess.run(["bash", str(WATCHDOG)], env=env, capture_output=True, text=True, check=True)
         return result.stdout
 
@@ -134,3 +148,24 @@ def test_hung_job_stops_the_instance_at_six_hours(booted):
     out = booted.tick(uptime_s=50000, gpu_util=99, running=1)
     assert booted.stopped()
     assert "queue busy for 360 minutes" in out
+
+
+@pytest.mark.parametrize("reading", ["[N/A]", "", "No devices were found"])
+def test_unreadable_gpu_telemetry_with_an_empty_queue_counts_as_idle(booted, reading):
+    booted.set_counter("rig_idle_ticks", 5)
+    out = booted.tick(uptime_s=1000, gpu_util=reading)
+    assert "GPU utilization unreadable" in out
+    assert booted.stopped()
+
+
+def test_unreadable_gpu_telemetry_with_queued_work_is_not_idle(booted):
+    booted.tick(uptime_s=1000, gpu_util="[N/A]", running=1)
+    assert booted.counter("rig_idle_ticks") == 0
+    assert booted.counter("rig_busy_ticks") == 1
+
+
+@pytest.mark.skipif(shutil.which("timeout") is None, reason="needs coreutils timeout")
+def test_hung_nvidia_smi_is_bounded_and_counts_as_unreadable(booted):
+    out = booted.tick(uptime_s=1000, gpu_delay_s=5)
+    assert "GPU utilization unreadable" in out
+    assert booted.counter("rig_idle_ticks") == 1
