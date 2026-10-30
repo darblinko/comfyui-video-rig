@@ -22,6 +22,18 @@ class ComfyError(RuntimeError):
     pass
 
 
+ERROR_DETAIL_LIMIT = 2000
+
+
+def http_error_detail(err: urllib.error.HTTPError) -> str:
+    """The first part of an error response body. The read is bounded in size and
+    by the request's socket timeout; a stalled or broken body gives a fallback text."""
+    try:
+        return err.read(ERROR_DETAIL_LIMIT).decode(errors="replace")
+    except (http.client.HTTPException, OSError) as read_err:
+        return f"error body unreadable ({read_err})"
+
+
 class ComfyClient:
     def __init__(self, host: str = "127.0.0.1", port: int = 8188, timeout: int = 60):
         self.base = f"http://{host}:{port}"
@@ -37,8 +49,7 @@ class ComfyClient:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 return read(resp)
         except urllib.error.HTTPError as err:
-            detail = err.read().decode(errors="replace")
-            raise ComfyError(f"{context} ({err.code}): {detail[:2000]}") from err
+            raise ComfyError(f"{context} ({err.code}): {http_error_detail(err)}") from err
         except json.JSONDecodeError as err:
             raise ComfyError(f"{context}: response is not valid JSON ({err})") from err
         except (urllib.error.URLError, http.client.HTTPException, OSError) as err:
@@ -158,7 +169,8 @@ class ComfyClient:
 
     def download_output(self, file_info: dict, dest_dir: Path) -> Path:
         """Stream one output to dest_dir. The body goes to a .part file that is
-        renamed only when complete, so a failed download leaves no file."""
+        renamed only when complete (and, when the server sends Content-Length,
+        only when that many bytes arrived), so a failed download leaves no file."""
         query = urllib.parse.urlencode(
             {
                 "filename": file_info["filename"],
@@ -171,9 +183,17 @@ class ComfyClient:
         partial = dest.with_name(dest.name + ".part")
 
         def save(resp) -> None:
+            received = 0
             with open(partial, "wb") as out:
                 while chunk := resp.read(1 << 20):
                     out.write(chunk)
+                    received += len(chunk)
+            expected = resp.headers.get("Content-Length")
+            # http.client returns a short body at EOF without raising, so check here.
+            if expected is not None and expected.isdigit() and received != int(expected):
+                raise ComfyError(
+                    f"download of {file_info['filename']} incomplete: {received} of {expected} bytes received"
+                )
 
         try:
             self._request(f"{self.base}/view?{query}", f"download of {file_info['filename']} failed", save)

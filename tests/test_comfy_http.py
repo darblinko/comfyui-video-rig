@@ -182,3 +182,32 @@ def test_upload_returns_the_server_subfolder_path(server, client, tmp_path):
     image.write_bytes(b"png")
     server.upload_subfolder = "rig"
     assert client.upload_image(image) == f"rig/{server.uploads[-1]}"
+
+
+def test_download_shorter_than_content_length_is_rejected(server, client, tmp_path, monkeypatch):
+    def short_body(handler, _method):
+        handler.send_response(200)
+        handler.send_header("Content-Length", "100")
+        handler.end_headers()
+        handler.wfile.write(b"12345")
+        handler.wfile.flush()
+        handler.close_connection = True
+
+    monkeypatch.setattr(server, "handle", short_body)
+    with pytest.raises(ComfyError, match="5 of 100 bytes"):
+        client.download_output({"filename": "clip.mp4", "subfolder": "", "type": "output"}, tmp_path)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_stalled_http_error_body_still_becomes_a_comfy_error(server, client, monkeypatch):
+    def stalled_reject(handler, _method):
+        handler.send_response(400)
+        handler.send_header("Content-Length", "100")
+        handler.end_headers()
+        handler.wfile.write(b'{"err')
+        handler.wfile.flush()
+        server.release.wait(CLIENT_TIMEOUT_S * 3)
+
+    monkeypatch.setattr(server, "handle", stalled_reject)
+    with pytest.raises(ComfyError, match=r"\(400\): error body unreadable"):
+        client.queue_prompt({})
