@@ -37,7 +37,7 @@ from s3_sync import PRESIGN_TTL_S, SHAREABLE_SUFFIXES, load_aws_config, sync_run
 VIDEO_SUFFIXES = {".mp4", ".webm", ".webp", ".gif"}
 REFERENCE_KEYS = ("start_image", "mask_image")
 
-# label -> (workflow file, native fps). Frame counts are derived from
+# label: (workflow file, native fps). Frame counts are derived from
 # job duration_seconds * fps; "length" fields are rounded to 4k+1 (Wan requirement).
 MODEL_WORKFLOWS = {
     "wan22": ("wan22_i2v.json", 16),

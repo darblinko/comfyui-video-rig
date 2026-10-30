@@ -12,7 +12,7 @@ drift between versions, so on first run:
 1. Open the tunnel (`python3 launch_rig.py tunnel`) and load http://localhost:8188.
 2. Open `Workflow > Browse Templates` and load the official template for the
    model (Wan 2.2 image-to-video, HunyuanVideo, Flux).
-3. Compare it against the starter here. If they differ, fix the starter — or
+3. Compare it against the starter here. If they differ, fix the starter or
    replace it entirely: tag the nodes as below, then `Export (API)` over the file.
 
 ## RIG_* title convention
@@ -29,7 +29,7 @@ when present:
 | `RIG_MASK` | LoadImageMask | `image` = uploaded job `mask_image` |
 | `RIG_LATENT` | latent/video-size node | `width`/`height` = job `resolution`; `length`/`frames`/`num_frames` from `duration_seconds` x model fps (`length` rounded to 4k+1 for Wan) |
 | `RIG_VIDEO` | CreateVideo | `fps` = model native fps |
-| `RIG_OUTPUT` | SaveImage / SaveVideo | nothing injected — marks the output node |
+| `RIG_OUTPUT` | SaveImage / SaveVideo | nothing injected; marks the output node |
 
 Untagged nodes pass through untouched, so any exported workflow works as long
 as the relevant nodes carry these titles. Top-level JSON keys starting with
@@ -37,9 +37,9 @@ as the relevant nodes carry these titles. Top-level JSON keys starting with
 
 ## Files
 
-- `flux_persona_ref.json` — persona reference stills for a synthetic presenter persona
-- `flux_start_frame.json` — harmonizes a product paste-up into a photoreal start frame (mask protects the product pixels)
-- `wan22_i2v.json` — Wan 2.2 A14B image-to-video, two-stage high/low-noise sampling
-- `hunyuan15_i2v.json` — HunyuanVideo 1.5 720p image-to-video, mirrored from the
+- `flux_persona_ref.json`: persona reference stills for a synthetic presenter persona
+- `flux_start_frame.json`: harmonizes a product paste-up into a photoreal start frame (mask protects the product pixels)
+- `wan22_i2v.json`: Wan 2.2 A14B image-to-video, two-stage high/low-noise sampling
+- `hunyuan15_i2v.json`: HunyuanVideo 1.5 720p image-to-video, mirrored from the
   official `video_hunyuan_video_1.5_720p_i2v` template (EasyCache and the 1080p
   super-resolution stage omitted; CFGGuider cfg 6, shift 7, euler/simple 20 steps)

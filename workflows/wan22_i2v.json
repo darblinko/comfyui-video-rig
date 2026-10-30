@@ -1,5 +1,5 @@
 {
-  "_note": "Wan 2.2 A14B image-to-video starter (ComfyUI API format, high/low-noise MoE two-stage sampling). VALIDATE against the official ComfyUI Wan 2.2 template on first run - node and field names drift across ComfyUI versions. Keys starting with '_' are stripped before submission. Injection targets the RIG_* titles; see workflows/README.md.",
+  "_note": "Wan 2.2 A14B image-to-video starter (ComfyUI API format, high/low-noise MoE two-stage sampling). VALIDATE against the official ComfyUI Wan 2.2 template on first run: node and field names drift across ComfyUI versions. Keys starting with '_' are stripped before submission. Injection targets the RIG_* titles; see workflows/README.md.",
   "1": {
     "class_type": "UNETLoader",
     "inputs": {

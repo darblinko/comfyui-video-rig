@@ -27,7 +27,7 @@ def download_file(entry: dict, dest_root: Path, staging: Path) -> bool:
     downloaded = hf_hub_download(repo_id=entry["repo"], filename=entry["path"], local_dir=staging)
     dest_dir.mkdir(parents=True, exist_ok=True)
     shutil.move(downloaded, dest_path)
-    print(f"  -> {dest_path}")
+    print(f"  saved {dest_path}")
     return True
 
 

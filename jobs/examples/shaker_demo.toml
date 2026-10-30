@@ -15,5 +15,5 @@ prompt = """photorealistic woman with shoulder-length auburn hair holding a prot
 negative_prompt = "deformed hands, extra fingers, fused fingers, warped face, plastic skin, flickering, morphing product label, distorted text, watermark"
 
 duration_seconds = 5
-resolution = [720, 1280]   # 9:16 IG portrait
+resolution = [720, 1280]   # 9:16 portrait
 seed = 123456

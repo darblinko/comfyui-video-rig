@@ -51,7 +51,7 @@ EOF
 
 systemctl daemon-reload
 systemctl enable --now rig-idle-watchdog.timer
-# The user-data fail-safe (shutdown -h +180) is no longer needed - the watchdog
+# The user-data fail-safe (shutdown -h +180) is no longer needed: the watchdog
 # owns cost safety from here, including the 3h stuck-bootstrap backstop.
 shutdown -c 2>/dev/null || true
 
@@ -106,7 +106,7 @@ if ! "$COMFY_DIR/venv/bin/python" /opt/rig-bootstrap/download_models.py \
   --manifest /opt/rig-bootstrap/models.json \
   --groups "$RIG_MODEL_GROUPS" \
   --dest "$MODELS_DIR"; then
-  echo "WARNING: model downloads failed entirely - continuing so services still" \
+  echo "WARNING: model downloads failed entirely; continuing so services still" \
        "come up; fix bootstrap/models.json and re-run download_models.py manually"
 fi
 
@@ -115,7 +115,7 @@ chown -R "$RUN_USER:$RUN_USER" "$COMFY_DIR" "$MODELS_DIR"
 
 cat > /etc/systemd/system/comfyui.service <<EOF
 [Unit]
-Description=ComfyUI (localhost only - reach via SSM tunnel)
+Description=ComfyUI (localhost only, reached through the SSM tunnel)
 After=network.target
 
 [Service]
@@ -134,5 +134,5 @@ systemctl enable --now comfyui.service
 
 touch "$BOOT_MARKER"
 echo "=== Bootstrap complete"
-echo "ComfyUI on 127.0.0.1:$RIG_COMFY_PORT - open a tunnel from your workstation:"
+echo "ComfyUI on 127.0.0.1:$RIG_COMFY_PORT. Open a tunnel from your workstation:"
 echo "  python3 launch_rig.py tunnel"

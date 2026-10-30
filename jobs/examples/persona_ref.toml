@@ -1,7 +1,7 @@
-# Step 1: generate candidate reference stills for the synthetic brand persona.
+# Step 1: generate candidate reference stills for the synthetic presenter persona.
 # Keep the prompt (the "character bible") IDENTICAL across runs and vary only
 # the seed. Once a look is chosen, save the winning refs + this prompt in
-# personas/presenter_kitchen_v1/ - the same description then anchors every video prompt.
+# personas/presenter_kitchen_v1/; the same description then anchors every video prompt.
 #
 # Run: python3 runner/run_job.py jobs/examples/persona_ref.toml
 

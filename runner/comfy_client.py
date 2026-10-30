@@ -36,7 +36,7 @@ class ComfyClient:
             detail = err.read().decode(errors="replace")
             raise ComfyError(f"{context} ({err.code}): {detail[:2000]}") from err
         except (urllib.error.URLError, OSError) as err:
-            raise ComfyError(f"{context}: cannot reach ComfyUI at {self.base} - is the tunnel open? ({err})") from err
+            raise ComfyError(f"{context}: cannot reach ComfyUI at {self.base}; is the tunnel open? ({err})") from err
 
     def _post_json(self, path: str, payload: dict, context: str) -> None:
         req = urllib.request.Request(
