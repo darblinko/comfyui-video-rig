@@ -90,6 +90,8 @@ class FakeComfy:
         self.address = (host, port)
         self.queued = []
 
+    failing_labels: tuple[str, ...] = ()
+
     def ping(self):
         if not self.reachable:
             raise ComfyError("cannot reach ComfyUI at http://127.0.0.1:8188")
@@ -99,6 +101,10 @@ class FakeComfy:
 
     def queue_prompt(self, workflow):
         self.queued.append(workflow)
+        title_of = {node["_meta"]["title"]: node for node in workflow.values() if "_meta" in node}
+        model = title_of.get("RIG_LATENT", {}).get("class_type", "")
+        if any(label in model.lower() for label in self.failing_labels):
+            raise ComfyError("CUDA out of memory")
         return f"prompt-{len(self.queued)}"
 
     def wait(self, prompt_id, timeout_s):
@@ -144,6 +150,30 @@ def test_bakeoff_writes_finals_comparison_and_manifest(sandbox):
     assert manifest["compare"] == "compare_side_by_side.mp4"
     assert manifest["errors"] == []
     assert commands[-1][commands[-1].index("-filter_complex") + 1].endswith("hstack")
+
+
+def run_bakeoff(root: Path, *extra: str) -> tuple[int, dict]:
+    args = run_job.parse_args([str(write_job(root, _toml(BAKEOFF_JOB))), "--no-sync", "--port", "8188", *extra])
+    job = load_job(args.job_file)
+    status = run_job.run_job(args, job, run_job.plan_runs(job, None))
+    (run_dir,) = (root / "outputs").iterdir()
+    return status, json.loads((run_dir / "manifest.json").read_text())
+
+
+def test_partial_bakeoff_failure_exits_nonzero(sandbox, monkeypatch):
+    root, _ = sandbox
+    monkeypatch.setattr(FakeComfy, "failing_labels", ("hunyuan",))
+    status, manifest = run_bakeoff(root)
+    assert status == 1
+    assert [r["label"] for r in manifest["results"]] == ["wan22"]
+    assert manifest["errors"] == [{"label": "hunyuan15", "error": "CUDA out of memory"}]
+
+
+def test_partial_bakeoff_failure_can_be_allowed(sandbox, monkeypatch):
+    root, _ = sandbox
+    monkeypatch.setattr(FakeComfy, "failing_labels", ("hunyuan",))
+    status, _ = run_bakeoff(root, "--allow-partial")
+    assert status == 0
 
 
 def test_unreachable_comfyui_leaves_no_run_folder(sandbox, monkeypatch):

@@ -243,7 +243,17 @@ def run_job(args: argparse.Namespace, job: dict, runs: list[dict]) -> int:
 
     if not args.no_sync and results:
         sync_and_print_links(out_dir)
-    return 1 if errors and not results else 0
+    return exit_status(results, errors, args.allow_partial)
+
+
+def exit_status(results: list, errors: list, allow_partial: bool) -> int:
+    """1 when any run failed, unless --allow-partial accepts a job where at least one run succeeded."""
+    if not errors:
+        return 0
+    if results and allow_partial:
+        print(f"WARNING: {len(errors)} of {len(results) + len(errors)} runs failed (accepted by --allow-partial)")
+        return 0
+    return 1
 
 
 # --- dry run -------------------------------------------------------------
@@ -320,6 +330,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--port", type=int, help="ComfyUI port (default: comfyui_port in rig.config.toml)")
     parser.add_argument("--timeout", type=int, default=3600, help="per-run seconds")
     parser.add_argument("--no-sync", action="store_true", help="skip S3 upload")
+    parser.add_argument(
+        "--allow-partial",
+        action="store_true",
+        help="exit 0 when at least one model succeeded and another failed (default: exit 1)",
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",
