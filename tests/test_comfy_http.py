@@ -150,3 +150,16 @@ def test_download_writes_the_whole_body(server, client, tmp_path):
     dest = client.download_output({"filename": "clip.mp4", "subfolder": "rig", "type": "output"}, tmp_path)
     assert dest.read_bytes() == b"x" * 4096
     assert "filename=clip.mp4&subfolder=rig&type=output" in server.requests[-1][1]
+
+
+def test_cancel_of_a_pending_prompt_does_not_interrupt_the_running_one(server, client):
+    server.queue = {"queue_running": [[1, "p-other", {}, {}, []]], "queue_pending": [[2, "p1", {}, {}, []]]}
+    client.cancel("p1")
+    assert server.posts_to("/queue") == [{"delete": ["p1"]}]
+    assert server.posts_to("/interrupt") == []
+
+
+def test_cancel_of_the_running_prompt_interrupts_only_that_prompt(server, client):
+    server.queue = {"queue_running": [[1, "p1", {}, {}, []]], "queue_pending": []}
+    client.cancel("p1")
+    assert server.posts_to("/interrupt") == [{"prompt_id": "p1"}]

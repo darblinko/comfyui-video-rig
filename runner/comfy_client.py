@@ -71,14 +71,26 @@ class ComfyClient:
         return data["prompt_id"]
 
     def cancel(self, prompt_id: str) -> None:
-        """Best-effort: drop the prompt from the pending queue, then interrupt
-        the running execution. Keeps a timed-out job from grinding (and the
-        idle watchdog from seeing a busy queue) after the client gives up."""
-        for path, payload in (("/queue", {"delete": [prompt_id]}), ("/interrupt", {})):
-            try:
-                self._post_json(path, payload, f"POST {path} failed")
-            except ComfyError as err:
-                print(f"  cancel via {path}: {err}")
+        """Best-effort, and only for this prompt: drop it from the pending queue,
+        then interrupt it if it is the one running. Keeps a timed-out job from
+        grinding (and the idle watchdog from seeing a busy queue) after the
+        client gives up, without aborting another client's running prompt."""
+        try:
+            self._post_json("/queue", {"delete": [prompt_id]}, "POST /queue failed")
+        except ComfyError as err:
+            print(f"  cancel via /queue: {err}")
+        try:
+            running = self._get_json("/queue").get("queue_running", [])
+        except ComfyError as err:
+            print(f"  cancel: queue unreadable, not interrupting: {err}")
+            return
+        if not any(len(item) > 1 and item[1] == prompt_id for item in running):
+            return
+        try:
+            # Current ComfyUI interrupts only the named prompt when prompt_id is given.
+            self._post_json("/interrupt", {"prompt_id": prompt_id}, "POST /interrupt failed")
+        except ComfyError as err:
+            print(f"  cancel via /interrupt: {err}")
 
     def wait(self, prompt_id: str, timeout_s: int = 3600, poll_s: int = DEFAULT_POLL_S) -> dict:
         """Poll until the prompt finishes; returns its history entry.

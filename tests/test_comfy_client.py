@@ -10,11 +10,17 @@ def client(monkeypatch):
     instance = ComfyClient()
     instance.posts = []
     monkeypatch.setattr(instance, "_post_json", lambda path, payload, _ctx: instance.posts.append((path, payload)))
+    monkeypatch.setattr(instance, "_get_json", lambda path: RUNNING_P1 if path == "/queue" else {})
     return instance
+
+
+RUNNING_P1 = {"queue_running": [[1, "p1", {}, {}, []]], "queue_pending": []}
 
 
 def history_sequence(client, monkeypatch, responses):
     def get_json(path):
+        if path == "/queue":
+            return RUNNING_P1
         response = responses.pop(0)
         if isinstance(response, Exception):
             raise response
@@ -54,7 +60,7 @@ def test_fifth_poll_failure_cancels_and_raises(client, monkeypatch):
     history_sequence(client, monkeypatch, [ComfyError("tunnel closed")] * 5)
     with pytest.raises(ComfyError, match="tunnel closed"):
         client.wait("p1")
-    assert client.posts == [("/queue", {"delete": ["p1"]}), ("/interrupt", {})]
+    assert client.posts == [("/queue", {"delete": ["p1"]}), ("/interrupt", {"prompt_id": "p1"})]
 
 
 def test_timeout_cancels_the_prompt(client):
