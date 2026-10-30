@@ -5,16 +5,22 @@
 # Runs from a systemd timer every 5 minutes. The instance is launched with
 # InstanceInitiatedShutdownBehavior=stop, so `shutdown -h` stops it (EBS and
 # models persist) rather than terminating it.
+#
+# The file locations below default to the on-box paths; the RIG_WATCHDOG_*
+# overrides exist so tests can run the script against a temporary directory.
 set -u
-source /etc/rig.env
+source "${RIG_WATCHDOG_ENV_FILE:-/etc/rig.env}"
 TICK_MINUTES=5
-STATE_FILE=/var/tmp/rig_idle_ticks
-BUSY_FILE=/var/tmp/rig_busy_ticks
-BOOT_MARKER=/var/lib/rig-bootstrap-done
+STATE_DIR=${RIG_WATCHDOG_STATE_DIR:-/var/tmp}
+STATE_FILE=$STATE_DIR/rig_idle_ticks
+BUSY_FILE=$STATE_DIR/rig_busy_ticks
+BOOT_MARKER=${RIG_WATCHDOG_BOOT_MARKER:-/var/lib/rig-bootstrap-done}
+UPTIME_FILE=${RIG_WATCHDOG_UPTIME_FILE:-/proc/uptime}
 MAX_BOOTSTRAP_SECONDS=$((3 * 3600))
+BOOT_GRACE_SECONDS=600
 MAX_JOB_MINUTES=${RIG_MAX_JOB_MINUTES:-360}
 
-uptime_s=$(cut -d. -f1 /proc/uptime)
+uptime_s=$(cut -d. -f1 "$UPTIME_FILE")
 
 # While bootstrap is still running (no marker yet), hold off - but never
 # indefinitely: a bootstrap that hasn't finished after 3 hours is stuck, and
@@ -29,7 +35,7 @@ if [ ! -f "$BOOT_MARKER" ]; then
 fi
 
 # Fresh boot grace period; also clears stale tick counts persisted across stops.
-if [ "$uptime_s" -lt 600 ]; then
+if [ "$uptime_s" -lt "$BOOT_GRACE_SECONDS" ]; then
   echo 0 > "$STATE_FILE"
   echo 0 > "$BUSY_FILE"
   exit 0
