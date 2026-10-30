@@ -96,7 +96,7 @@ rig_models:
   upscale_models: upscale_models
 EOF
 
-HF_TOKEN=$(aws ssm get-parameter --name /comfyui-video-rig/hf-token --with-decryption \
+HF_TOKEN=$(aws ssm get-parameter --name "$RIG_HF_TOKEN_PARAM" --with-decryption \
   --query Parameter.Value --output text --region "$RIG_REGION" 2>/dev/null || true)
 if [ -n "${HF_TOKEN:-}" ]; then
   export HF_TOKEN

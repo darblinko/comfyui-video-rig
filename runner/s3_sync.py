@@ -11,27 +11,21 @@ from __future__ import annotations
 
 import argparse
 import mimetypes
-import os
-import tomllib
+import sys
 from pathlib import Path
 
 import boto3
 
-PROTO_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from rig_config import CONFIG_FILE, load_config
+
 PRESIGN_TTL_S = 7 * 24 * 3600  # SigV4 maximum
 SHAREABLE_SUFFIXES = {".mp4", ".webm", ".webp", ".png", ".jpg", ".jpeg", ".json"}
 
 
-def load_aws_config(config_path: Path) -> dict:
-    with open(config_path, "rb") as fh:
-        cfg = tomllib.load(fh)
-    bucket = os.environ.get("RIG_OUTPUTS_BUCKET") or cfg["s3"]["outputs_bucket"]
-    if not bucket:
-        raise SystemExit("set RIG_OUTPUTS_BUCKET (or [s3] outputs_bucket in rig.config.toml)")
-    return {
-        "region": os.environ.get("AWS_REGION") or cfg["aws"]["region"],
-        "bucket": bucket,
-    }
+def load_aws_config(config_path: Path = CONFIG_FILE) -> dict:
+    cfg = load_config(config_path)
+    return {"region": cfg["aws"]["region"], "bucket": cfg["s3"]["outputs_bucket"]}
 
 
 def sync_run(run_dir: Path, aws: dict, prefix: str = "runs") -> dict[str, str]:
@@ -58,7 +52,7 @@ def sync_run(run_dir: Path, aws: dict, prefix: str = "runs") -> dict[str, str]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run_dir", type=Path)
-    parser.add_argument("--config", type=Path, default=PROTO_DIR / "rig.config.toml")
+    parser.add_argument("--config", type=Path, default=CONFIG_FILE)
     args = parser.parse_args()
     if not args.run_dir.is_dir():
         raise SystemExit(f"not a directory: {args.run_dir}")
