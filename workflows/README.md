@@ -31,6 +31,13 @@ when present:
 | `RIG_VIDEO` | CreateVideo | `fps` = model native fps |
 | `RIG_OUTPUT` | SaveImage / SaveVideo | nothing injected; marks the output node |
 
+"Model fps" is the native fps of the model (16 for Wan 2.2, 24 for
+HunyuanVideo 1.5). A job that names a workflow file directly
+(`workflow = "workflows/x.json"`) uses the job's `fps` if set, else the native
+fps of the model whose workflow has that file name; a video workflow with
+neither is rejected before anything is queued. An unknown model name or a
+missing workflow file also stops the job before anything is queued.
+
 Untagged nodes pass through untouched, so any exported workflow works as long
 as the relevant nodes carry these titles. Top-level JSON keys starting with
 `_` (like `_note`) are stripped before submission.

@@ -66,26 +66,56 @@ def load_job(path: Path) -> dict:
     return {**JOB_DEFAULTS, **job}
 
 
+FRAME_FIELDS = ("length", "frames", "num_frames")
+
+
+def is_video_workflow(path: Path) -> bool:
+    """True when the workflow has a RIG_VIDEO node or a RIG_LATENT node with a frame count."""
+    for node_id, node in json.loads(path.read_text()).items():
+        if node_id.startswith("_"):
+            continue
+        title = node_title(node)
+        if title == "RIG_VIDEO" or (title == "RIG_LATENT" and any(f in node["inputs"] for f in FRAME_FIELDS)):
+            return True
+    return False
+
+
+def explicit_workflow_fps(job: dict, path: Path) -> int | None:
+    """The job's fps, else the native fps of a known model workflow with the same file name."""
+    if "fps" in job:
+        fps = job["fps"]
+        if not isinstance(fps, int) or isinstance(fps, bool) or fps < 1:
+            raise SystemExit(f"fps must be a positive integer, got {fps!r}")
+        return fps
+    return next((fps for filename, fps in MODEL_WORKFLOWS.values() if filename == path.name), None)
+
+
+def plan_explicit_workflow(job: dict, repo_dir: Path) -> list[dict]:
+    path = repo_dir / job["workflow"]
+    if not path.exists():
+        raise SystemExit(f"workflow {job['workflow']} not found")
+    fps = explicit_workflow_fps(job, path)
+    if fps is None and is_video_workflow(path):
+        raise SystemExit(f"{job['workflow']} renders video: set fps in the job so duration_seconds sets the frames")
+    return [{"label": path.stem, "workflow_path": path, "fps": fps}]
+
+
 def plan_runs(job: dict, model_filter: list[str] | None, repo_dir: Path = REPO_DIR) -> list[dict]:
-    """Return [{label, workflow_path, fps}] for this job, skipping missing files."""
+    """Return [{label, workflow_path, fps}] for this job. An unknown model or a
+    missing workflow file stops the job before anything is queued."""
     if "workflow" in job:
-        path = repo_dir / job["workflow"]
-        return [{"label": path.stem, "workflow_path": path, "fps": None}]
+        return plan_explicit_workflow(job, repo_dir)
+    unknown = [m for m in [*job["models"], *(model_filter or [])] if m not in MODEL_WORKFLOWS]
+    if unknown:
+        raise SystemExit(f"unknown model '{unknown[0]}' (known: {list(MODEL_WORKFLOWS)})")
     runs = []
     for model in job["models"]:
         if model_filter and model not in model_filter:
             continue
-        if model not in MODEL_WORKFLOWS:
-            print(f"WARNING: unknown model '{model}' (known: {list(MODEL_WORKFLOWS)})")
-            continue
         filename, fps = MODEL_WORKFLOWS[model]
         path = repo_dir / "workflows" / filename
         if not path.exists():
-            print(
-                f"WARNING: skipping '{model}': {path.name} not found. Export it from "
-                "the ComfyUI template browser first (see workflows/README.md)."
-            )
-            continue
+            raise SystemExit(f"model '{model}': {path.name} not found in {path.parent}")
         runs.append({"label": model, "workflow_path": path, "fps": fps})
     return runs
 
@@ -100,7 +130,7 @@ def latent_updates(inputs: dict, job: dict, fps: int | None) -> dict:
     updates = {field: value for field, value in (("width", width), ("height", height)) if field in inputs}
     if fps:
         frames = int(job["duration_seconds"] * fps)
-        for field in ("length", "frames", "num_frames"):
+        for field in FRAME_FIELDS:
             if field in inputs:
                 updates[field] = round_to_4k1(frames) if field == "length" else frames
                 break
@@ -173,7 +203,7 @@ def effective_frames(workflow: dict) -> int | None:
     """Frame count the RIG_LATENT node was given, after rounding."""
     for node in workflow.values():
         if node_title(node) == "RIG_LATENT":
-            for field in ("length", "frames", "num_frames"):
+            for field in FRAME_FIELDS:
                 if field in node["inputs"]:
                     return node["inputs"][field]
     return None

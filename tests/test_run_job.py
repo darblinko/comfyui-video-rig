@@ -40,16 +40,59 @@ def test_job_without_prompt_is_rejected(tmp_path):
         load_job(write_job(tmp_path, 'models = ["wan22"]\n'))
 
 
-def test_plan_skips_unknown_models_and_honours_the_filter(capsys):
-    job = {**BAKEOFF_JOB, "models": ["wan22", "hunyuan15", "sora"]}
-    assert [run["label"] for run in plan_runs(job, None)] == ["wan22", "hunyuan15"]
-    assert [run["label"] for run in plan_runs(job, ["hunyuan15"])] == ["hunyuan15"]
-    assert "unknown model 'sora'" in capsys.readouterr().out
+def test_plan_honours_the_model_filter():
+    assert [run["label"] for run in plan_runs(BAKEOFF_JOB, None)] == ["wan22", "hunyuan15"]
+    assert [run["label"] for run in plan_runs(BAKEOFF_JOB, ["hunyuan15"])] == ["hunyuan15"]
 
 
-def test_plan_skips_models_whose_workflow_is_missing(tmp_path, capsys):
-    assert plan_runs(BAKEOFF_JOB, None, repo_dir=tmp_path) == []
-    assert "wan22_i2v.json not found" in capsys.readouterr().out
+def test_plan_rejects_unknown_models():
+    job = {**BAKEOFF_JOB, "models": ["wan22", "hunyuanl5"]}
+    with pytest.raises(SystemExit, match="unknown model 'hunyuanl5'"):
+        plan_runs(job, None)
+
+
+def test_plan_rejects_unknown_models_in_the_filter():
+    with pytest.raises(SystemExit, match="unknown model 'sora'"):
+        plan_runs(BAKEOFF_JOB, ["sora"])
+
+
+def test_plan_rejects_models_whose_workflow_is_missing(tmp_path):
+    with pytest.raises(SystemExit, match="wan22_i2v.json not found"):
+        plan_runs(BAKEOFF_JOB, None, repo_dir=tmp_path)
+
+
+def test_plan_rejects_a_missing_explicit_workflow(tmp_path):
+    with pytest.raises(SystemExit, match="not found"):
+        plan_runs({"prompt": "p", "workflow": "workflows/none.json"}, None, repo_dir=tmp_path)
+
+
+def test_explicit_video_workflow_takes_the_model_fps_and_duration():
+    job = {**BAKEOFF_JOB, "duration_seconds": 10, "workflow": "workflows/wan22_i2v.json"}
+    del job["models"]
+    run = plan_runs(job, None)[0]
+    assert run["fps"] == 16
+    workflow = render_workflow(run, job, {})
+    by_title = {node["_meta"]["title"]: node["inputs"] for node in workflow.values() if "_meta" in node}
+    assert by_title["RIG_LATENT"]["length"] == 161
+
+
+def test_explicit_job_fps_overrides_the_model_fps():
+    job = {"prompt": "p", "duration_seconds": 5, "fps": 8, "workflow": "workflows/wan22_i2v.json"}
+    assert plan_runs(job, None)[0]["fps"] == 8
+
+
+def test_explicit_unknown_video_workflow_needs_an_fps(tmp_path):
+    source = REPO_DIR / "workflows" / "wan22_i2v.json"
+    (tmp_path / "workflows").mkdir()
+    (tmp_path / "workflows" / "custom_video.json").write_text(source.read_text())
+    job = {"prompt": "p", "workflow": "workflows/custom_video.json"}
+    with pytest.raises(SystemExit, match="set fps"):
+        plan_runs(job, None, repo_dir=tmp_path)
+
+
+def test_explicit_image_workflow_needs_no_fps():
+    job = {"prompt": "p", "workflow": "workflows/flux_persona_ref.json"}
+    assert plan_runs(job, None)[0]["fps"] is None
 
 
 def test_tagged_nodes_receive_job_values():
