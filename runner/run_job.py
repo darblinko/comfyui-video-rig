@@ -169,9 +169,24 @@ def build_side_by_side(finals: list[Path], dest: Path) -> Path | None:
     return run_ffmpeg(cmd, dest)
 
 
+def effective_frames(workflow: dict) -> int | None:
+    """Frame count the RIG_LATENT node was given, after rounding."""
+    for node in workflow.values():
+        if node_title(node) == "RIG_LATENT":
+            for field in ("length", "frames", "num_frames"):
+                if field in node["inputs"]:
+                    return node["inputs"][field]
+    return None
+
+
 def execute_run(client: ComfyClient, run: dict, job: dict, uploads: dict, out_dir: Path, timeout_s: int) -> dict:
     print(f"\n=== {run['label']}: queueing")
     workflow = render_workflow(run, job, uploads)
+    # The submitted workflow holds every node input: steps, cfg, sampler,
+    # scheduler, shift and model file names, as well as the injected job values.
+    submitted = out_dir / run["label"] / "workflow_api.json"
+    submitted.parent.mkdir(parents=True, exist_ok=True)
+    submitted.write_text(json.dumps(workflow, indent=2) + "\n")
     started = time.monotonic()
     prompt_id = client.queue_prompt(workflow)
     entry = client.wait(prompt_id, timeout_s=timeout_s)
@@ -186,6 +201,10 @@ def execute_run(client: ComfyClient, run: dict, job: dict, uploads: dict, out_di
     return {
         "label": run["label"],
         "prompt_id": prompt_id,
+        "workflow_template": str(run["workflow_path"].relative_to(REPO_DIR)),
+        "workflow_submitted": str(submitted.relative_to(out_dir)),
+        "fps": run["fps"],
+        "frames": effective_frames(workflow),
         "elapsed_s": elapsed,
         "files": [str(f.relative_to(out_dir)) for f in files],
         "final": str(final.relative_to(out_dir)) if final else None,
@@ -196,12 +215,22 @@ def make_run_id(job_file: Path, now: datetime) -> str:
     return f"{now:%Y%m%d-%H%M%S}-{job_file.stem}"
 
 
-def write_manifest(out_dir: Path, run_id: str, job_file: Path, job: dict, results: list, errors: list, compare):
+def runtime_provenance(client: ComfyClient) -> dict:
+    try:
+        return client.system_stats()
+    except ComfyError as err:
+        return {"error": str(err)}
+
+
+def write_manifest(
+    out_dir: Path, run_id: str, job_file: Path, job: dict, results: list, errors: list, compare, comfyui: dict
+):
     manifest = {
         "run_id": run_id,
         "created_at": datetime.now(UTC).isoformat(),
         "job_file": str(job_file),
         "job": job,
+        "comfyui": comfyui,
         "results": results,
         "errors": errors,
         "compare": compare.name if compare else None,
@@ -228,6 +257,7 @@ def run_job(args: argparse.Namespace, job: dict, runs: list[dict]) -> int:
     run_id = make_run_id(args.job_file, datetime.now())
     out_dir = REPO_DIR / "outputs" / run_id
     out_dir.mkdir(parents=True)
+    comfyui = runtime_provenance(client)
     results, errors = [], []
     for run in runs:
         try:
@@ -238,7 +268,7 @@ def run_job(args: argparse.Namespace, job: dict, runs: list[dict]) -> int:
 
     finals = [out_dir / r["final"] for r in results if r["final"]]
     compare = build_side_by_side(finals, out_dir / "compare_side_by_side.mp4")
-    write_manifest(out_dir, run_id, args.job_file, job, results, errors, compare)
+    write_manifest(out_dir, run_id, args.job_file, job, results, errors, compare, comfyui)
     print(f"\nrun folder: {out_dir}")
 
     if not args.no_sync and results:
@@ -312,7 +342,7 @@ def print_plan(args: argparse.Namespace, job: dict, runs: list[dict], now: datet
         print(f"\ncomparison: {shlex.join(compare)}")
     if not ffmpeg_available():
         print("ffmpeg not found locally: a real run would skip the encode and the comparison")
-    print(f"manifest: {out_rel}/manifest.json")
+    print(f"manifest: {out_rel}/manifest.json (job, GET /system_stats, per-run workflow_api.json, timings)")
     if args.no_sync:
         print("S3 sync: skipped (--no-sync)")
         return

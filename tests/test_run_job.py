@@ -96,6 +96,9 @@ class FakeComfy:
         if not self.reachable:
             raise ComfyError("cannot reach ComfyUI at http://127.0.0.1:8188")
 
+    def system_stats(self):
+        return {"system": {"comfyui_version": "0.0-test", "pytorch_version": "2.x-test"}, "devices": []}
+
     def upload_image(self, path):
         return path.name
 
@@ -174,6 +177,19 @@ def test_partial_bakeoff_failure_can_be_allowed(sandbox, monkeypatch):
     monkeypatch.setattr(FakeComfy, "failing_labels", ("hunyuan",))
     status, _ = run_bakeoff(root, "--allow-partial")
     assert status == 0
+
+
+def test_manifest_records_the_submitted_workflow_and_runtime(sandbox):
+    root, _ = sandbox
+    _, manifest = run_bakeoff(root)
+    (run_dir,) = (root / "outputs").iterdir()
+    wan = manifest["results"][0]
+    assert wan["workflow_template"] == "workflows/wan22_i2v.json"
+    assert (wan["fps"], wan["frames"]) == (16, 81)
+    submitted = json.loads((run_dir / wan["workflow_submitted"]).read_text())
+    sampler = next(node for node in submitted.values() if node["_meta"]["title"].startswith("RIG_SAMPLER"))
+    assert sampler["inputs"]["noise_seed"] == 42
+    assert manifest["comfyui"]["system"]["comfyui_version"] == "0.0-test"
 
 
 def test_unreachable_comfyui_leaves_no_run_folder(sandbox, monkeypatch):

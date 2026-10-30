@@ -60,6 +60,10 @@ class ComfyClient:
         it creates a run folder, so a closed tunnel leaves nothing behind."""
         self._get_json("/queue")
 
+    def system_stats(self) -> dict:
+        """ComfyUI, Python and PyTorch versions and the GPU devices, as the server reports them."""
+        return self._get_json("/system_stats")
+
     def queue_prompt(self, workflow: dict) -> str:
         payload = json.dumps({"prompt": workflow, "client_id": self.client_id}).encode()
         req = urllib.request.Request(
