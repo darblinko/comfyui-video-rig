@@ -1,4 +1,5 @@
 import subprocess
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -20,7 +21,19 @@ def spec() -> dict:
 @pytest.mark.parametrize("seg", [1, 2, 3, 4])
 def test_spec_reproduces_the_committed_segment_jobs(spec, model, seg):
     committed = SPEC_PATH.parent / "generated" / f"{model}_seg{seg}.toml"
-    assert segment_toml(spec, model, seg) == committed.read_text()
+    assert tomllib.loads(segment_toml(spec, model, seg)) == tomllib.loads(committed.read_text())
+
+
+@pytest.mark.parametrize(
+    "text",
+    ['text, "logo"', "back\\slash", "line one\nline two", 'ends with a quote"', "tab\tand\x7fdel", 'three """ quotes'],
+)
+def test_segment_toml_round_trips_any_prompt_text(spec, text):
+    spec = {**spec, "negative_prompt": text, "persona": text, "persona_id": text}
+    job = tomllib.loads(segment_toml(spec, "wan22", 2))
+    assert job["negative_prompt"] == text
+    assert job["persona_id"] == text
+    assert job["prompt"] == f"{text}, {spec['beats'][1]}, {spec['suffix']}"
 
 
 def test_segments_chain_from_the_previous_last_frame(spec):
