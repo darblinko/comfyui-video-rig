@@ -11,11 +11,29 @@ set -euo pipefail
 exec > >(tee -a /var/log/rig-bootstrap.log) 2>&1
 
 source /etc/rig.env
+source /opt/rig-bootstrap/versions.env
 COMFY_DIR=/opt/comfyui
 MODELS_DIR=/opt/models
 RUN_USER=ubuntu
 PIP="$COMFY_DIR/venv/bin/pip"
 BOOT_MARKER=/var/lib/rig-bootstrap-done
+VERSIONS_FILE=/opt/rig-bootstrap/installed-versions.txt
+
+# Clone a repository if absent, check out a pinned ref when one is given, and
+# record the commit that ends up installed.
+install_repo() {
+  local url=$1 dir=$2 ref=$3
+  if [ ! -d "$dir" ]; then
+    git clone "$url" "$dir"
+  fi
+  # A re-run as root meets checkouts already chowned to $RUN_USER.
+  local git=(git -c safe.directory="$dir" -C "$dir")
+  if [ -n "$ref" ]; then
+    "${git[@]}" fetch origin "$ref"
+    "${git[@]}" checkout --detach FETCH_HEAD
+  fi
+  echo "$url $("${git[@]}" rev-parse HEAD)${ref:+ (pinned $ref)}" >> "$VERSIONS_FILE"
+}
 
 echo "=== [1/7] GPU check"
 nvidia-smi
@@ -56,30 +74,30 @@ systemctl enable --now rig-idle-watchdog.timer
 shutdown -c 2>/dev/null || true
 
 echo "=== [4/7] ComfyUI"
-if [ ! -d "$COMFY_DIR" ]; then
-  git clone https://github.com/comfyanonymous/ComfyUI "$COMFY_DIR"
-fi
+echo "# bootstrap $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$VERSIONS_FILE"
+install_repo https://github.com/comfyanonymous/ComfyUI "$COMFY_DIR" "$COMFYUI_REF"
 if [ ! -d "$COMFY_DIR/venv" ]; then
   python3 -m venv "$COMFY_DIR/venv"
 fi
 "$PIP" install --upgrade pip
-"$PIP" install torch torchvision torchaudio
+# shellcheck disable=SC2086  # TORCH_REQUIREMENTS is a list of specifiers
+"$PIP" install $TORCH_REQUIREMENTS
 "$PIP" install -r "$COMFY_DIR/requirements.txt"
 "$PIP" install "huggingface_hub[hf_transfer]"
 
 echo "=== [5/7] Custom nodes"
-for repo in \
-  https://github.com/ltdrdata/ComfyUI-Manager \
-  https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite; do
-  name=$(basename "$repo")
-  dir="$COMFY_DIR/custom_nodes/$name"
-  if [ ! -d "$dir" ]; then
-    git clone "$repo" "$dir"
-  fi
+for spec in \
+  "https://github.com/ltdrdata/ComfyUI-Manager $COMFYUI_MANAGER_REF" \
+  "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite $VIDEOHELPERSUITE_REF"; do
+  read -r repo ref <<< "$spec"
+  dir="$COMFY_DIR/custom_nodes/$(basename "$repo")"
+  install_repo "$repo" "$dir" "${ref:-}"
   if [ -f "$dir/requirements.txt" ]; then
     "$PIP" install -r "$dir/requirements.txt"
   fi
 done
+
+"$PIP" freeze >> "$VERSIONS_FILE"
 
 echo "=== [6/7] Models"
 mkdir -p "$MODELS_DIR"/{checkpoints,diffusion_models,text_encoders,vae,clip_vision,loras,controlnet,upscale_models}
