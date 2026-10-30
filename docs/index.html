@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>comfyui-video-rig</title>
+  <meta name="description" content="Scripts that run ComfyUI on a single-GPU EC2 instance reached only through SSM, submit image and video jobs to it, and stop it when it goes idle.">
+  <link rel="icon" href="data:,">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono&family=IBM+Plex+Sans:wght@400;600&display=swap">
+  <link rel="stylesheet" href="site.css">
+</head>
+<body>
+  <header class="site-bar">
+    <a href="https://darblinko.github.io/">Mitchell Foutz</a>
+    <a href="https://github.com/Nysara-Global-LLC/comfyui-video-rig">Source on GitHub</a>
+  </header>
+
+  <main>
+    <section class="intro">
+      <h1>comfyui-video-rig</h1>
+      <p class="lede">Scripts that run ComfyUI on a single-GPU EC2 instance reached only through SSM, submit image and video jobs to it, and stop it when it goes idle. For comparing open image-to-video models on the same prompt and seed without leaving a GPU instance running.</p>
+      <dl class="record">
+        <div><dt>Repository</dt><dd>Nysara-Global-LLC/comfyui-video-rig</dd></div>
+        <div><dt>Revision</dt><dd><code>6a286f2</code></dd></div>
+        <div><dt>Measured</dt><dd>2026-07-11</dd></div>
+        <div><dt>License</dt><dd>Apache-2.0</dd></div>
+      </dl>
+      <figure class="chart" data-chart="summary"></figure>
+    </section>
+
+    <section>
+      <h2>Problem</h2>
+      <p>A 5 s, 720x1280 image-to-video clip took between 1,378.9 s and 1,587.9 s on the recorded runs. Comparing two models means hours of GPU time per prompt. A GPU instance left running after a session, or held by a hung job, bills until someone notices.</p>
+      <p>ComfyUI has no authentication of its own. Exposing its port to the internet exposes the instance.</p>
+      <aside class="note">
+        <p>Clip times: <code>results/manifests/*.json</code>, field <code>elapsed_s</code>, summarized by <code>python3 results/summarize.py</code>.</p>
+      </aside>
+    </section>
+
+    <section>
+      <h2>How it works</h2>
+      <p><code>launch_rig.py</code> creates an S3 bucket, an instance role and a security group with no inbound rules, then starts a <code>g6e.xlarge</code> from the AWS Deep Learning Base AMI. First boot installs ComfyUI and the FLUX.1-dev, Wan 2.2 A14B and HunyuanVideo 1.5 weights, binds ComfyUI to 127.0.0.1 and enables a watchdog timer. The workstation reaches ComfyUI through an SSM port forward.</p>
+      <p><code>run_job.py</code> loads an API-format workflow per model, sets the prompt, seed, start image and frame count on nodes titled <code>RIG_*</code>, queues it, downloads the outputs and writes a manifest. <code>run_chain.py</code> builds longer clips from 5 s segments, each starting from the last frame of the one before. Every command accepts <code>--dry-run</code> and prints the AWS calls, HTTP requests and ffmpeg commands without running them.</p>
+      <pre class="mermaid">
+flowchart LR
+  launch[launch_rig.py] -- boto3 --> s3[(S3 bucket)]
+  launch -- run_instances --> ec2[g6e.xlarge, no inbound rules]
+  s3 -- bootstrap files --> ec2
+  job[run_job.py] -- SSM port forward --> comfy[ComfyUI on 127.0.0.1:8188]
+  ec2 --> comfy
+  ec2 --> dog[idle_watchdog.sh every 5 min]
+  comfy -- clips --> out[(outputs/run_id)]
+  out -- s3_sync.py --> s3
+  dog -- shutdown -h --> ec2
+      </pre>
+      <aside class="note">
+        <p>Watchdog limits: <code>idle_stop_minutes = 30</code> and <code>max_job_minutes = 360</code> in <code>rig.config.toml</code>; 3 h bootstrap limit and 600 s boot grace in <code>bootstrap/idle_watchdog.sh</code>; 180 minute fail-safe shutdown in the user data in <code>launch_rig.py</code>.</p>
+      </aside>
+    </section>
+
+    <section>
+      <h2>Measured results</h2>
+      <p>16 runs were recorded on 2026-07-11. Two failed before queueing because ComfyUI was not reachable through the tunnel. Each model generated the same five clips from the same prompt and seed: one bake-off clip and four chained segments.</p>
+      <aside class="note">
+        <p>Source: <code>results/manifests/*.json</code>. Chart data: <code>python3 results/summarize.py --check</code> confirms <code>docs/data.json</code> matches the manifests. The manifests record no instance type or software versions; <code>g6e.xlarge</code> is inferred from <code>rig.config.toml</code>.</p>
+      </aside>
+      <figure class="chart" data-chart="video-clip-time"></figure>
+      <p>FLUX.1-dev stills took 16.7 s to 194.0 s. The two long runs were the first FLUX run of the day and the first after the video bake-off. That the difference is checkpoint loading is an inference; it was not measured.</p>
+      <figure class="chart" data-chart="still-time"></figure>
+      <p>Comparison clip: Wan 2.2 A14B on the left, HunyuanVideo 1.5 on the right, four chained segments each. The start frame was generated by FLUX.1-dev from a text prompt. Audio removed.</p>
+      <video controls muted playsinline preload="none" poster="media/compare_poster.jpg" src="media/compare_side_by_side_20s.mp4" style="max-width: 100%; height: auto;" width="812" height="720"></video>
+    </section>
+
+    <section>
+      <h2>Run it</h2>
+      <ol class="steps">
+        <li><pre><code>git clone https://github.com/Nysara-Global-LLC/comfyui-video-rig
+cd comfyui-video-rig</code></pre></li>
+        <li><pre><code>uv sync --group dev
+uv run pytest -q</code></pre></li>
+        <li><pre><code>uv run python launch_rig.py --dry-run launch
+uv run python runner/run_job.py jobs/examples/shaker_demo.toml --dry-run</code></pre></li>
+      </ol>
+      <p>The dry runs need no AWS credentials. A real launch needs <code>RIG_OUTPUTS_BUCKET</code> set (see <code>.env.example</code>), the Session Manager plugin and a G instance vCPU quota of at least 4. The repository does not distribute model weights; each model has its own licence, listed in the README.</p>
+    </section>
+
+    <section>
+      <h2>Limitations</h2>
+      <ul>
+        <li>ComfyUI, its custom nodes and torch are installed at their latest versions on first boot and are not pinned.</li>
+        <li>Jobs are submitted from the workstation; it must stay connected through the tunnel for the length of a run.</li>
+        <li>The prototype goal, a clip with a consistent presenter and a legible product label, has no recorded pass or fail.</li>
+        <li>The composited start frame workflow has no recorded run.</li>
+        <li>Errors carry forward through a chain: the last frame of HunyuanVideo segment 2 shows a second headset that was not prompted, and later segments start from it.</li>
+        <li>Not measured: cost per clip, GPU memory use, model output quality.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    comfyui-video-rig. Apache-2.0. Figures generated from <code>docs/data.json</code> at <code>6a286f2</code>.
+  </footer>
+
+  <script src="charts.js" defer></script>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.esm.min.mjs";
+    const dark = document.documentElement.dataset.theme === "dark" ||
+      (document.documentElement.dataset.theme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+    mermaid.initialize({ startOnLoad: true, theme: dark ? "dark" : "neutral",
+      fontFamily: "IBM Plex Sans, system-ui, sans-serif", securityLevel: "strict" });
+  </script>
+</body>
+</html>
