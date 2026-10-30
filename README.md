@@ -1,149 +1,189 @@
-# ComfyUI video rig
+# comfyui-video-rig
 
-Proof of concept for AI product-demo video generation. The single question it
-answers: **can this pipeline produce an IG-ready product-demo clip with a
-consistent synthetic persona and a pixel-faithful branded product?**
+Scripts that provision a single-GPU EC2 instance running ComfyUI, submit image and video generation jobs to it over an SSM tunnel, and stop it when it goes idle.
 
-Scope decisions (interview, 2026-07-10): quality first, real EC2 G6e rig
-driven entirely by `rig.config.toml`, synthetic brand persona (no real
-likeness), product fidelity via composited start frames, rig + S3 outputs
-only (no SQS/DynamoDB/FastAPI yet), Wan 2.2 vs Hunyuan 1.5 bake-off.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/summary-dark.svg">
+  <img alt="Runs recorded: 16; Video clips generated: 11; Wan 2.2 A14B, median per clip: 1,422 s; HunyuanVideo 1.5, median per clip: 1,452 s" src="docs/figures/summary-light.svg" width="760">
+</picture>
 
-## Architecture
+Figures come from the 16 run manifests in [`results/manifests/`](results/manifests/), recorded on 2026-07-11. [`results/summarize.py`](results/summarize.py) computes every number in [`docs/data.json`](docs/data.json); [`results/README.md`](results/README.md) lists what the manifests measure and how they were edited for publication.
 
+## What it does
+
+- Provisions an S3 bucket, an IAM instance profile and a security group with no inbound rules, then launches a `g6e.xlarge` (1x NVIDIA L40S 48 GB) from the AWS Deep Learning Base AMI ([`launch_rig.py`](launch_rig.py), [`rig.config.toml`](rig.config.toml)).
+- Installs ComfyUI, its custom nodes and the FLUX.1-dev, Wan 2.2 A14B and HunyuanVideo 1.5 weights at first boot ([`bootstrap/`](bootstrap/)).
+- Runs a job file through one or more models with the same prompt and seed, downloads the outputs, encodes a 9:16 MP4 per model and stacks the first two side by side ([`runner/run_job.py`](runner/run_job.py)).
+- Chains 5 s image-to-video segments into longer clips, each segment starting from the last frame of the one before ([`chain/`](chain/)).
+- Stops the instance on GPU idle, on a hung job and on a stuck bootstrap ([`bootstrap/idle_watchdog.sh`](bootstrap/idle_watchdog.sh)).
+- Prints every AWS call, ComfyUI request and ffmpeg command without executing any of them when given `--dry-run`.
+
+## How it works
+
+```mermaid
+flowchart LR
+    subgraph local[Workstation]
+        L[launch_rig.py]
+        J[runner/run_job.py]
+        C[chain/run_chain.py]
+        O[(outputs/run_id/)]
+    end
+    subgraph aws[AWS account]
+        S3[(S3 bucket<br/>bootstrap/ and runs/)]
+        SSM[SSM Session Manager]
+        subgraph ec2[EC2 g6e.xlarge, no inbound rules]
+            B[bootstrap.sh]
+            UI[ComfyUI on 127.0.0.1:8188]
+            W[idle_watchdog.sh<br/>systemd timer, 5 min]
+        end
+    end
+    L -- boto3 --> S3
+    L -- boto3 run_instances --> ec2
+    S3 -- bootstrap files --> B
+    B --> UI
+    B --> W
+    C -- one job per segment --> J
+    J -- port forward --> SSM --> UI
+    UI -- clips --> J --> O
+    O -- s3_sync.py --> S3
+    W -- shutdown -h --> ec2
 ```
-WSL workstation                          AWS us-west-2
----------------                          -------------
-launch_rig.py  ──boto3──────────────▶    EC2 g6e.xlarge (L40S 48GB)
-runner/run_job.py ──SSM tunnel:8188─▶      ComfyUI (127.0.0.1 only, systemd)
-                                           /opt/models (FLUX, Wan 2.2, Hunyuan)
-                                           idle watchdog (auto-stop)
-outputs/<run_id>/ ◀──downloads──           │
-   └──s3_sync.py──────────────────▶      S3 outputs bucket (presigned links)
-```
 
-No inbound ports are ever opened — all access is SSM. Cost safety is layered: user-data arms a 3h `shutdown -h`
-fail-safe that bootstrap cancels once the watchdog timer is live; the watchdog
-then stops the instance after `idle_stop_minutes` of GPU idle, kills a
-bootstrap stuck past 3h, and treats a queue busy past `max_job_minutes` as a
-hung job. A stopped instance costs only its EBS volume.
+1. `launch_rig.py provision` creates the bucket (public access blocked), uploads `bootstrap/`, and creates the role and security group. The role can read `bootstrap/` in the bucket, read the Hugging Face token parameter, and register with SSM.
+2. `launch_rig.py launch` resolves the AMI from its SSM alias and starts the instance. User data arms `shutdown -h +180` and runs `bootstrap.sh`, which installs ComfyUI, downloads the model groups listed in `rig.config.toml`, starts ComfyUI as a systemd service bound to 127.0.0.1, enables the watchdog timer and then cancels the 180 minute shutdown.
+3. `launch_rig.py tunnel` forwards local port 8188 to ComfyUI through SSM. There is no SSH and no open port.
+4. `run_job.py` reads a job TOML, loads the API-format workflow for each model from [`workflows/`](workflows/), writes job values into nodes titled `RIG_*` (prompt, seed, start image, frame count), queues it, polls `/history`, downloads the outputs and writes `manifest.json` with every parameter and the elapsed time.
+5. `s3_sync.py` uploads the run folder and prints presigned links valid for 7 days (`PRESIGN_TTL_S` in [`runner/s3_sync.py`](runner/s3_sync.py)).
 
-## Costs (us-west-2, approximate)
+## Results
 
-| Item | Rate |
-|---|---|
-| g6e.xlarge on-demand | ~$1.86/hr while running |
-| 300GB gp3 EBS | ~$24/mo (persists while stopped) |
-| S3 + SSM | negligible at POC scale |
+The runs below were made on one day of testing. The manifests do not record the instance type or software versions; that they ran on `g6e.xlarge` is inferred from `rig.config.toml`.
 
-## Prerequisites
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/video-clip-time-dark.svg">
+  <img alt="Each clip took between 1,378.9 and 1,587.9 seconds. Wan 2.2 A14B: 1490.4, 1444.2, 1412.1, 1408.8, 1409.3; HunyuanVideo 1.5: 1587.9, 1572.9, 1451.7, 1397.4, 1378.9" src="docs/figures/video-clip-time-light.svg" width="760">
+</picture>
 
-- AWS CLI + Session Manager plugin; credentials through `AWS_PROFILE` or the default chain
-- `RIG_OUTPUTS_BUCKET` set to an S3 bucket name you own (see `.env.example`)
-- **G-instance vCPU quota**: g6e.xlarge needs 4 vCPUs of quota
-  `L-DB2E81BA` ("Running On-Demand G and VT instances"). `launch` checks and
-  warns; fresh accounts often sit at 0 and need a quota increase first.
-- Optional: `HF_TOKEN` env var set at launch time if you swap in gated
-  Hugging Face models (the default manifest needs no token). The token is
-  stored in SSM parameter `/comfyui-video-rig/hf-token`; a previously stored token is
-  reused on later launches until you delete the parameter (deprovision does).
-- `ffmpeg` locally for the IG encode + side-by-side steps (`sudo apt install ffmpeg`)
+Source: `results/manifests/*.json`, chart `video-clip-time` in `docs/data.json`.
 
-## Runbook
+- Each 5 s, 720x1280 clip took between 1,378.9 s and 1,587.9 s from queueing to the last download.
+- HunyuanVideo 1.5 took longer than Wan 2.2 A14B on the bake-off and chain segments 1 and 2, and less on segments 3 and 4.
+- The Wan 2.2 median (1,422 s, 6 clips) includes run `20260711-103944-video_shaker` (1,432.2 s), which has no HunyuanVideo counterpart and is not in the chart.
 
-### 0. Launch the rig
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/still-time-dark.svg">
+  <img alt="persona_ref 1034: 194.0 s; frame_shaker 1038: 16.7 s; frame_headphones 1449: 155.1 s; frame_headphones 1454: 26.2 s" src="docs/figures/still-time-light.svg" width="760">
+</picture>
+
+Source: `results/manifests/*.json`, chart `still-time` in `docs/data.json`.
+
+- FLUX.1-dev stills took 16.7 s to 194.0 s. The two long runs were the first FLUX run of the day and the first FLUX run after the video bake-off. Inference, not measured: the difference is checkpoint loading.
+
+### Comparison clip
+
+[![Two 20 s clips side by side, Wan 2.2 A14B on the left and HunyuanVideo 1.5 on the right](docs/media/compare_poster.jpg)](docs/media/compare_side_by_side_20s.mp4)
+
+[`docs/media/compare_side_by_side_20s.mp4`](docs/media/compare_side_by_side_20s.mp4): Wan 2.2 A14B on the left, HunyuanVideo 1.5 on the right, four chained 5 s segments each, built by `chain/postprocess.py` from [`jobs/headphones_test/chain.toml`](jobs/headphones_test/chain.toml).
+
+- The start frame was generated by FLUX.1-dev from a text prompt (run `20260711-145433-frame_headphones`, seed 555001). No photograph or third-party image was used as input.
+- Segment n starts from the last frame of segment n-1 with seed 555100 + n, the same for both models.
+- The published file was re-encoded without audio and without container metadata (libx264, CRF 27, 1.6 MB). The original voiceover track is not included.
+
+## Quickstart
+
+Requires Python 3.11 or later and [uv](https://docs.astral.sh/uv/). The dry runs need no AWS credentials and make no network calls.
 
 ```bash
-cd comfyui-video-rig
-python3 launch_rig.py launch          # provisions bucket/role/SG as needed, boots the box
-python3 launch_rig.py session         # shell on the box
-  sudo tail -f /var/log/rig-bootstrap.log   # watch install + model downloads (30-60 min)
-python3 launch_rig.py tunnel          # keep open; ComfyUI at http://localhost:8188
+git clone <this repo> comfyui-video-rig && cd comfyui-video-rig
+uv sync --group dev
+uv run pytest -q
+uv run python launch_rig.py --dry-run launch
+uv run python runner/run_job.py jobs/examples/shaker_demo.toml --dry-run
 ```
 
-### 1. Validate workflows (first run only)
-
-Node/field names drift across ComfyUI versions and parts of
-`bootstrap/models.json` are marked UNVERIFIED. In the ComfyUI web UI, load
-`Workflow > Browse Templates` for Wan 2.2 / HunyuanVideo / Flux, fix any
-manifest filenames, and export a tagged `hunyuan15_i2v.json` —
-see `workflows/README.md`.
-
-### 2. Lock the persona
+To run it for real you need an AWS account with Session Manager access, the [Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html) for the AWS CLI, a vCPU quota of at least 4 for "Running On-Demand G and VT instances" (quota code `L-DB2E81BA`; `launch` checks it and warns), and ffmpeg on `PATH`.
 
 ```bash
-python3 runner/run_job.py jobs/examples/persona_ref.toml --no-sync
+cp .env.example .env                 # set RIG_OUTPUTS_BUCKET to a bucket name you own
+set -a; . ./.env; set +a
+uv run python launch_rig.py launch   # provisions on first use, then boots the instance
+uv run python launch_rig.py session  # optional: sudo tail -f /var/log/rig-bootstrap.log
+uv run python launch_rig.py tunnel   # leave open; ComfyUI is at http://localhost:8188
+uv run python runner/run_job.py jobs/examples/persona_ref.toml --no-sync
+uv run python launch_rig.py stop     # or let the watchdog stop it
 ```
 
-Rerun with different seeds until a candidate look wins. Save the winning refs
-and the exact prompt text in `personas/presenter_kitchen_v1/` (see its README).
+First boot downloads the model weights before ComfyUI starts. The starter workflows in `workflows/` are hand-written; compare them with the ComfyUI built-in templates before the first run ([`workflows/README.md`](workflows/README.md)).
 
-### 3. Build a start frame
+Other commands: `status`, `start`, `terminate` (deletes the instance and its volume), `deprovision` (deletes the security group, role, instance profile and token parameter; keeps the bucket).
 
-Real product photo in `products/`, rough paste-up + mask, then FLUX harmonize:
+### Start frame
+
+`jobs/examples/start_frame.toml` repaints a rough composite with FLUX.1-dev while a mask protects one region. Put the composite and mask in `products/pasteups/`. Black in the mask is kept and white is repainted. This path has no recorded run; see Limitations.
+
+### Chained clips
 
 ```bash
-# rough composite: product pasted onto a persona scene at roughly the right spot
-magick persona_scene.png products/shaker_bottle.png -geometry +260+700 -composite \
-  products/pasteups/shaker_kitchen_pasteup.png
-# mask: BLACK protects the product, WHITE lets FLUX repaint (start from all-white,
-# draw a black shape over the product; any editor works)
-
-python3 runner/run_job.py jobs/examples/start_frame.toml --no-sync
-# pick the best result and copy it to outputs/start_frames/shaker_kitchen_v1.png
+uv run python chain/run_chain.py jobs/headphones_test/chain.toml   # all models, all segments
+uv run python chain/postprocess.py jobs/headphones_test/chain.toml # joins and side-by-side
 ```
 
-### 4. The bake-off
+`chain.toml` holds the persona, the per-segment action beats, the seed base and the model list. Generated segment jobs go to `jobs/headphones_test/generated/`.
 
-```bash
-python3 runner/run_job.py jobs/examples/shaker_demo.toml
-```
+## Cost and safety
 
-Runs the same start frame + seed through Wan 2.2 and Hunyuan 1.5, downloads
-clips to `outputs/<run_id>/`, encodes IG-ready 9:16 MP4s, builds
-`compare_side_by_side.mp4`, and prints presigned S3 share links (7 days).
+| Layer | Setting | Source |
+|---|---|---|
+| Fail-safe at boot | `shutdown -h +180` in user data, cancelled once the watchdog is live | `launch_rig.py`, `bootstrap/bootstrap.sh` |
+| Stuck bootstrap | stop if bootstrap has not finished after 3 h | `bootstrap/idle_watchdog.sh` |
+| GPU idle | stop after `idle_stop_minutes = 30` with GPU use under 5 % and an empty ComfyUI queue | `rig.config.toml` |
+| Hung job | stop after the ComfyUI queue is busy for `max_job_minutes = 360` | `rig.config.toml` |
+| Network | security group with no inbound rules; ComfyUI bound to 127.0.0.1; access through SSM only | `launch_rig.py` |
+| Secrets | `HF_TOKEN` stored as an SSM SecureString and read on the instance; the dry run redacts it | `launch_rig.py`, `dry_run.py` |
 
-Iterate: vary seeds and prompts, keep the manifests — `outputs/*/manifest.json`
-records every parameter of every run.
+The watchdog runs every 5 minutes from a systemd timer, with a 600 s grace period after each boot. The instance is launched with `InstanceInitiatedShutdownBehavior=stop`, so a watchdog shutdown stops it. A stopped instance is not billed for compute; its 300 GB gp3 root volume (`root_volume_gb` in `rig.config.toml`) is billed until `terminate`. Check the current on-demand rate for `g6e.xlarge` in your region before launching; this repo records no prices.
 
-### 5. Stop the meter
+## Models and licences
 
-```bash
-python3 launch_rig.py stop       # or let the idle watchdog do it
-python3 launch_rig.py start      # next session; models persist on EBS
-```
+This repository does not distribute model weights. `bootstrap/download_models.py` fetches them on the instance from the Hugging Face repositories in [`bootstrap/models.json`](bootstrap/models.json). Each model has its own licence, which you must read and accept before use. The source project did not record licence names; the names below have not been checked against the model cards and are marked unverified.
 
-## Success gate
+| Model | Downloaded from | Licence (unverified) |
+|---|---|---|
+| FLUX.1-dev, fp8 checkpoint | `Comfy-Org/flux1-dev` | FLUX.1 [dev] Non-Commercial License |
+| Wan 2.2 A14B image-to-video, fp8 | `Comfy-Org/Wan_2.2_ComfyUI_Repackaged` | Apache-2.0 |
+| HunyuanVideo 1.5 720p image-to-video | `Comfy-Org/HunyuanVideo_1.5_repackaged` | Tencent Hunyuan Community License |
 
-Across ~10 test generations, at least one 5-8s clip where:
+The text encoders, VAEs and vision encoders in the same repositories may carry separate terms. ComfyUI and its custom nodes are installed from their own repositories under their own licences.
 
-1. the persona's face/body stays consistent across frames
-2. the product label is legible and undistorted for the clip's duration
-3. hand-product contact is believable (no extra/fused fingers)
-4. flicker/warp is within what a Topaz/upscale pass could clean up
-
-Pass → productionize (queue worker, job table, API wrapper).
-Fail → revisit models (LTX, closed APIs) before building any platform surface.
-
-## Teardown
-
-```bash
-python3 launch_rig.py terminate    # deletes instance + EBS (models gone)
-python3 launch_rig.py deprovision  # removes SG + IAM role/profile + HF token param; bucket kept
-```
-
-## Layout
+## Project layout
 
 ```
-rig.config.toml        every rig knob (instance type, AMI, disk, models, idle timeout)
-launch_rig.py          provision/launch/status/stop/start/terminate/tunnel/session/deprovision
-bootstrap/             runs on the instance at first boot (ComfyUI, models, systemd, watchdog)
-workflows/             ComfyUI API-format templates, RIG_* injection convention
-jobs/examples/         persona_ref -> start_frame -> shaker_demo (the three-step pipeline)
-runner/                run_job.py (submit/collect/encode/compare), comfy_client.py, s3_sync.py
-personas/ products/    persona bible + refs; real product photos + paste-ups
-outputs/               run folders (gitignored): clips, manifests, side-by-sides
+launch_rig.py          provision, launch, status, stop, start, terminate, tunnel, session, deprovision
+rig_config.py          reads rig.config.toml and the environment overrides in .env.example
+dry_run.py             stand-in boto3 session that prints calls instead of making them
+rig.config.toml        instance type, AMI alias, volume size, watchdog limits, model groups
+bootstrap/             first-boot install, model download, idle watchdog
+workflows/             ComfyUI API-format workflows with RIG_* node titles
+runner/                run_job.py, comfy_client.py, media.py (ffmpeg commands), s3_sync.py
+chain/                 run_chain.py (segment chain), postprocess.py (joins, side-by-side)
+jobs/                  examples/, live_test/ and headphones_test/ job files
+personas/ products/    persona notes; product images (gitignored)
+results/               16 recorded run manifests and summarize.py
+docs/                  data.json, chart SVGs, comparison clip, landing page
+tests/                 pytest suite; boto3, subprocess and HTTP are stubbed
 ```
+
+## Design decisions and limitations
+
+- One instance, no queue service. Jobs are submitted from the workstation through the tunnel, so the workstation must stay connected for the length of a run. The median recorded clip took 1,422 s (Wan 2.2) and 1,452 s (HunyuanVideo 1.5).
+- Workflows are found by node title rather than node ID, so a workflow exported again from the ComfyUI UI keeps working if the `RIG_*` titles are kept.
+- ComfyUI, its custom nodes and torch are installed from their latest versions at boot and are not pinned. A later boot can produce a different environment from the one that made the recorded runs.
+- Two of the 16 recorded runs failed before queueing because ComfyUI was not reachable through the tunnel. `run_job.py` now checks ComfyUI before it creates a run folder.
+- The prototype's goal was a clip with a consistent presenter and a legible product label. No run recorded a pass or fail against that goal.
+- The composited start frame path (`jobs/examples/start_frame.toml`) has no recorded run. The recorded video runs started from FLUX stills generated from text.
+- In the comparison clip, the last frame of HunyuanVideo segment 2 shows a second headset that is not in the prompt; the following segments start from it. Chaining from last frames carries such errors forward.
+- The voiceover used for the original clip and its text-to-speech source are not in the repo.
+- `docs/media/` holds a re-encoded copy; the per-run outputs and images are not published.
 
 ## AI-generated content and pre-distribution review
 
@@ -154,3 +194,7 @@ FLUX.1 [dev] Non-Commercial License section 2(e) requires content filtering or r
 - Reviewed by owner: pending
 - Review date: pending
 - Distribute the files above only after the owner has reviewed them and replaced "pending" with the outcome.
+
+## License
+
+Apache-2.0. Copyright Nysara Global LLC. See [LICENSE](LICENSE). The model weights fetched at runtime are not covered by this licence.
