@@ -38,7 +38,7 @@ as the relevant nodes carry these titles. Top-level JSON keys starting with
 ## Files
 
 - `flux_persona_ref.json`: persona reference stills for a synthetic presenter persona
-- `flux_start_frame.json`: harmonizes a product paste-up into a photoreal start frame (mask protects the product pixels)
+- `flux_start_frame.json`: harmonizes a product paste-up into a photoreal start frame (an ImageCompositeMasked node after decoding copies the original pixels back wherever the mask is black)
 - `wan22_i2v.json`: Wan 2.2 A14B image-to-video, two-stage high/low-noise sampling
 - `hunyuan15_i2v.json`: HunyuanVideo 1.5 720p image-to-video, adapted (MIT License, see `THIRD_PARTY_NOTICES.md`) from the
   official `video_hunyuan_video_1.5_720p_i2v` template (EasyCache and the 1080p

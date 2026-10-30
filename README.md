@@ -120,7 +120,7 @@ Other commands: `status`, `start`, `terminate` (deletes the instance and its vol
 
 ### Start frame
 
-`jobs/examples/start_frame.toml` repaints a rough composite with FLUX.1-dev while a mask protects one region. Put the composite and mask in `products/pasteups/`. Black in the mask is kept and white is repainted. This path has no recorded run; see Limitations.
+`jobs/examples/start_frame.toml` repaints a rough composite with FLUX.1-dev while a mask protects one region. Put the composite and mask in `products/pasteups/`. Black in the mask is kept and white is repainted: after decoding, the workflow composites the original pixels back through the mask, so black regions are the input pixels rather than a VAE round trip. The mask must have the same dimensions as the composite. This path has no recorded run; see Limitations.
 
 ### Chained clips
 

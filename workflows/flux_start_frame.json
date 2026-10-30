@@ -1,5 +1,5 @@
 {
-  "_note": "FLUX.1-dev fp8 start-frame harmonizer (ComfyUI API format). Input is a rough paste-up (real product photo composited onto a persona scene) plus a mask; low-denoise img2img blends lighting and edges while the masked-out product pixels stay untouched. Mask convention: WHITE = regenerate (background/persona edges), BLACK = protect (the product). See the main README for the paste-up step.",
+  "_note": "FLUX.1-dev fp8 start-frame harmonizer (ComfyUI API format). Input is a rough paste-up (real product photo composited onto a persona scene) plus a mask; low-denoise img2img blends lighting and edges, then ImageCompositeMasked pastes the original pixels back wherever the mask is black, so the protected product pixels are the input pixels rather than a VAE round trip. Mask convention: WHITE = regenerate (background/persona edges), BLACK = protect (the product). See the main README for the paste-up step.",
   "1": {
     "class_type": "CheckpointLoaderSimple",
     "inputs": { "ckpt_name": "flux1-dev-fp8.safetensors" },
@@ -59,9 +59,21 @@
     "inputs": { "samples": ["8", 0], "vae": ["1", 2] },
     "_meta": { "title": "Decode" }
   },
+  "11": {
+    "class_type": "ImageCompositeMasked",
+    "inputs": {
+      "destination": ["2", 0],
+      "source": ["9", 0],
+      "x": 0,
+      "y": 0,
+      "resize_source": false,
+      "mask": ["3", 0]
+    },
+    "_meta": { "title": "Restore Protected Pixels" }
+  },
   "10": {
     "class_type": "SaveImage",
-    "inputs": { "images": ["9", 0], "filename_prefix": "rig/start_frame" },
+    "inputs": { "images": ["11", 0], "filename_prefix": "rig/start_frame" },
     "_meta": { "title": "RIG_OUTPUT" }
   }
 }
