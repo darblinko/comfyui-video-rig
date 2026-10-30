@@ -119,7 +119,7 @@ def test_failed_segment_stops_the_chain(spec, tmp_path):
         return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="cannot reach ComfyUI")
 
     with pytest.raises(RuntimeError, match="segment 2 failed"):
-        run_chain.run_segment(spec, "wan22", 2, run=failing_run)
+        run_chain.run_segment(spec, "wan22", 2, run=failing_run, repo_dir=tmp_path)
 
 
 def test_resumed_segments_replace_earlier_records():
