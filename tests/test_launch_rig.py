@@ -41,6 +41,14 @@ def tagged_instance(instance_id: str, name: str, **tags) -> dict:
     return {"InstanceId": instance_id, "State": {"Name": "running"}, "Tags": tag_list}
 
 
+def rig_tags(cfg: dict, name: str) -> list[dict]:
+    return [*({"Key": k, "Value": v} for k, v in cfg["tags"].items()), {"Key": "Name", "Value": name}]
+
+
+def rig_group(cfg: dict, group_id: str, ingress: list | None = None) -> dict:
+    return {"GroupId": group_id, "Tags": rig_tags(cfg, f"{cfg['rig']['name']}-sg"), "IpPermissions": ingress or []}
+
+
 @pytest.fixture
 def owned_cfg() -> dict:
     env = {"RIG_OUTPUTS_BUCKET": TEST_BUCKET, "AWS_REGION": "us-west-2", "RIG_OWNER_TAG": "bob"}
@@ -156,6 +164,8 @@ def test_ssm_commands_rely_on_the_ambient_profile(cfg):
 def test_deprovision_treats_missing_resources_as_done(cfg, tmp_path):
     gone = client_error("NoSuchEntity")
     responses = {
+        **DEFAULT_VPC,
+        **SUBNETS,
         "ec2.describe_instances": {"Reservations": []},
         "iam.remove_role_from_instance_profile": gone,
         "iam.delete_instance_profile": gone,
@@ -167,8 +177,31 @@ def test_deprovision_treats_missing_resources_as_done(cfg, tmp_path):
     assert rig.session.kwargs_of("ec2.delete_security_group") == [{"GroupId": "sg-1"}]
 
 
+def test_deprovision_ignores_a_state_file_group_without_the_rig_tags(owned_cfg, tmp_path):
+    def describe_security_groups(**kwargs):
+        if kwargs.get("GroupIds") == ["sg-stale"]:
+            return {"SecurityGroups": []}
+        return {"SecurityGroups": [rig_group(owned_cfg, "sg-rig")]}
+
+    responses = {
+        **DEFAULT_VPC,
+        **SUBNETS,
+        "ec2.describe_instances": {"Reservations": []},
+        "ec2.describe_security_groups": describe_security_groups,
+    }
+    rig = rig_for(owned_cfg, responses, tmp_path)
+    rig.state_file.write_text(json.dumps({"sg_id": "sg-stale"}))
+    cmd_deprovision(rig)
+    assert rig.session.kwargs_of("ec2.delete_security_group") == [{"GroupId": "sg-rig"}]
+    filters = {f["Name"]: f["Values"] for f in rig.session.kwargs_of("ec2.describe_security_groups")[0]["Filters"]}
+    assert filters["vpc-id"] == ["vpc-1"]
+    assert filters["tag:Owner"] == ["bob"]
+
+
 def test_deprovision_reports_real_failures(cfg, tmp_path):
     responses = {
+        **DEFAULT_VPC,
+        **SUBNETS,
         "ec2.describe_instances": {"Reservations": []},
         "iam.delete_role": client_error("DeleteConflict"),
         **NO_SECURITY_GROUPS,

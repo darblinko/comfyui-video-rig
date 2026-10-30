@@ -554,15 +554,37 @@ def cleanup_step(label: str, call, **kwargs) -> bool:
         return False
 
 
+def rig_security_group_filters(cfg: dict, vpc_id: str) -> list[dict]:
+    """Filters matching only the rig's own group: its name and every rig tag, in the rig's VPC."""
+    name = resource_names(cfg)["sg"]
+    tags = {**cfg.get("tags", {}), "Name": name}
+    return [
+        {"Name": "group-name", "Values": [name]},
+        {"Name": "vpc-id", "Values": [vpc_id]},
+        *({"Name": f"tag:{key}", "Values": [value]} for key, value in tags.items()),
+    ]
+
+
 def find_rig_security_groups(rig: Rig, ec2) -> set[str]:
-    """Union of the state-file sg_id and any group matching the rig's name, so
-    a lost state file cannot orphan the SG."""
-    sg_ids = set()
+    """Groups in the rig's VPC carrying the rig's name and tags. The state-file
+    sg_id is included only when it passes the same filters, so a stale state
+    file cannot point deletion at an unrelated group."""
+    vpc_id, _ = resolve_vpc_and_subnet(ec2, rig.cfg)
+    filters = rig_security_group_filters(rig.cfg, vpc_id)
+    resp = ec2.describe_security_groups(Filters=filters)
+    sg_ids = {g["GroupId"] for g in resp["SecurityGroups"]}
     state_sg = read_state(rig).get("sg_id")
-    if state_sg:
-        sg_ids.add(state_sg)
-    resp = ec2.describe_security_groups(Filters=[{"Name": "group-name", "Values": [resource_names(rig.cfg)["sg"]]}])
-    sg_ids.update(g["GroupId"] for g in resp["SecurityGroups"])
+    if state_sg and state_sg not in sg_ids:
+        try:
+            owned = ec2.describe_security_groups(GroupIds=[state_sg], Filters=filters)["SecurityGroups"]
+        except ClientError as err:
+            if err.response["Error"]["Code"] != "InvalidGroup.NotFound":
+                raise
+            owned = []
+        if owned:
+            sg_ids.add(state_sg)
+        else:
+            print(f"WARNING: ignoring {state_sg} from .rig_state.json: not the rig's group in {vpc_id}")
     return sg_ids
 
 
