@@ -1,1 +1,2 @@
 client-a docs/media/*.mp4 Case-insensitive match on three bytes inside the H.264 bitstream of the AI-generated clip, offsets 29416 and 39866; no text, checked 2026-10-30
+aws-account-id tests/test_launch_rig.py 444455556666 is the placeholder account ID from the AWS IAM documentation, used as a foreign trust principal in a test; checked 2026-10-30
