@@ -17,6 +17,7 @@ from launch_rig import (
     run_instance_params,
     ssm_session_command,
 )
+from rig_config import load_config
 
 DEFAULT_VPC = {"ec2.describe_vpcs": {"Vpcs": [{"VpcId": "vpc-1"}]}}
 NO_SECURITY_GROUPS = {"ec2.describe_security_groups": {"SecurityGroups": []}}
@@ -35,8 +36,15 @@ def rig_for(cfg, responses=None, tmp_path=None) -> Rig:
     return Rig(cfg, FakeSession(responses), state_file=state_file)
 
 
-def tagged_instance(instance_id: str, name: str) -> dict:
-    return {"InstanceId": instance_id, "State": {"Name": "running"}, "Tags": [{"Key": "Name", "Value": name}]}
+def tagged_instance(instance_id: str, name: str, **tags) -> dict:
+    tag_list = [{"Key": "Name", "Value": name}, *({"Key": k, "Value": v} for k, v in tags.items())]
+    return {"InstanceId": instance_id, "State": {"Name": "running"}, "Tags": tag_list}
+
+
+@pytest.fixture
+def owned_cfg() -> dict:
+    env = {"RIG_OUTPUTS_BUCKET": TEST_BUCKET, "AWS_REGION": "us-west-2", "RIG_OWNER_TAG": "bob"}
+    return load_config(env=env)
 
 
 def test_instance_policy_is_read_only_and_scoped(cfg):
@@ -108,6 +116,17 @@ def test_state_file_instance_with_another_name_is_ignored(cfg, tmp_path):
     ]
     assert find_rig_instance(rig)["InstanceId"] == "i-rig"
     assert json.loads(rig.state_file.read_text())["instance_id"] == "i-rig"
+
+
+def test_state_file_instance_with_another_owner_is_ignored(owned_cfg, tmp_path):
+    name = owned_cfg["rig"]["name"]
+    rig = rig_for(owned_cfg, tmp_path=tmp_path)
+    rig.state_file.write_text(json.dumps({"instance_id": "i-alice"}))
+    rig.session.responses["ec2.describe_instances"] = [
+        {"Reservations": [{"Instances": [tagged_instance("i-alice", name, Project=name, Owner="alice")]}]},
+        {"Reservations": []},
+    ]
+    assert find_rig_instance(rig) is None
 
 
 def test_two_tagged_instances_stop_the_command(cfg, tmp_path):

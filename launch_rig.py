@@ -432,19 +432,25 @@ def rig_instance_filters(cfg: dict) -> list[dict]:
     return filters + [{"Name": f"tag:{key}", "Values": [value]} for key, value in cfg.get("tags", {}).items()]
 
 
+def has_rig_tags(tags: dict, cfg: dict, name: str) -> bool:
+    """True when tags carry the given Name and every configured tag, Owner included."""
+    expected = {**cfg.get("tags", {}), "Name": name}
+    return all(tags.get(key) == value for key, value in expected.items())
+
+
 def find_rig_instance(rig: Rig) -> dict | None:
     """Locate the rig by state file, falling back to tags if state was lost.
 
-    Both paths verify the rig tags so lifecycle commands (stop/terminate)
+    Both paths verify every rig tag so lifecycle commands (stop/terminate)
     can never act on an unrelated instance."""
     name = rig.cfg["rig"]["name"]
     state = read_state(rig)
     if state.get("instance_id"):
         info = instance_info(rig, state["instance_id"])
-        if info and instance_tags(info).get("Name") == name:
+        if info and has_rig_tags(instance_tags(info), rig.cfg, name):
             return info
         if info:
-            print(f"WARNING: ignoring {state['instance_id']} from .rig_state.json: its Name tag is not '{name}'")
+            print(f"WARNING: ignoring {state['instance_id']} from .rig_state.json: it lacks the rig tags")
     resp = rig.session.client("ec2").describe_instances(Filters=rig_instance_filters(rig.cfg))
     matches = [inst for r in resp["Reservations"] for inst in r["Instances"]]
     if len(matches) > 1:
