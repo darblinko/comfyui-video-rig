@@ -6,6 +6,7 @@ Talks to a ComfyUI instance, normally through the SSM tunnel opened by
 
 from __future__ import annotations
 
+import http.client
 import json
 import time
 import urllib.error
@@ -27,15 +28,20 @@ class ComfyClient:
         self.timeout = timeout
         self.client_id = uuid.uuid4().hex
 
-    def _open(self, req: urllib.request.Request | str, context: str):
-        """urlopen with every transport failure surfaced as ComfyError, so the
-        runner's per-run error handling (manifest, S3 sync) always survives."""
+    def _request(self, req: urllib.request.Request | str, context: str, read):
+        """Open req and return read(response). Every failure, including a timeout
+        or a broken connection while the body is read and a body that is not
+        JSON, is raised as ComfyError, so the runner's per-run error handling
+        (manifest, S3 sync) always survives."""
         try:
-            return urllib.request.urlopen(req, timeout=self.timeout)
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                return read(resp)
         except urllib.error.HTTPError as err:
             detail = err.read().decode(errors="replace")
             raise ComfyError(f"{context} ({err.code}): {detail[:2000]}") from err
-        except (urllib.error.URLError, OSError) as err:
+        except json.JSONDecodeError as err:
+            raise ComfyError(f"{context}: response is not valid JSON ({err})") from err
+        except (urllib.error.URLError, http.client.HTTPException, OSError) as err:
             raise ComfyError(f"{context}: cannot reach ComfyUI at {self.base}; is the tunnel open? ({err})") from err
 
     def _post_json(self, path: str, payload: dict, context: str) -> None:
@@ -44,11 +50,10 @@ class ComfyClient:
             data=json.dumps(payload).encode(),
             headers={"Content-Type": "application/json"},
         )
-        self._open(req, context).close()
+        self._request(req, context, lambda resp: resp.read())
 
     def _get_json(self, path: str) -> dict:
-        with self._open(self.base + path, f"GET {path} failed") as resp:
-            return json.load(resp)
+        return self._request(self.base + path, f"GET {path} failed", json.load)
 
     def ping(self) -> None:
         """Raise ComfyError unless the server answers; run_job calls this before
@@ -62,8 +67,7 @@ class ComfyClient:
             data=payload,
             headers={"Content-Type": "application/json"},
         )
-        with self._open(req, "ComfyUI rejected the workflow") as resp:
-            data = json.load(resp)
+        data = self._request(req, "ComfyUI rejected the workflow", json.load)
         return data["prompt_id"]
 
     def cancel(self, prompt_id: str) -> None:
@@ -130,11 +134,12 @@ class ComfyClient:
             data=b"".join(parts),
             headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
         )
-        with self._open(req, f"upload of {path.name} failed") as resp:
-            data = json.load(resp)
+        data = self._request(req, f"upload of {path.name} failed", json.load)
         return data["name"]
 
     def download_output(self, file_info: dict, dest_dir: Path) -> Path:
+        """Stream one output to dest_dir. The body goes to a .part file that is
+        renamed only when complete, so a failed download leaves no file."""
         query = urllib.parse.urlencode(
             {
                 "filename": file_info["filename"],
@@ -144,12 +149,19 @@ class ComfyClient:
         )
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest = dest_dir / Path(file_info["filename"]).name
-        with (
-            self._open(f"{self.base}/view?{query}", f"download of {file_info['filename']} failed") as resp,
-            open(dest, "wb") as out,
-        ):
-            while chunk := resp.read(1 << 20):
-                out.write(chunk)
+        partial = dest.with_name(dest.name + ".part")
+
+        def save(resp) -> None:
+            with open(partial, "wb") as out:
+                while chunk := resp.read(1 << 20):
+                    out.write(chunk)
+
+        try:
+            self._request(f"{self.base}/view?{query}", f"download of {file_info['filename']} failed", save)
+        except ComfyError:
+            partial.unlink(missing_ok=True)
+            raise
+        partial.replace(dest)
         return dest
 
     @staticmethod
