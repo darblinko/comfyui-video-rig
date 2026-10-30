@@ -111,31 +111,41 @@ def tag_list(cfg: dict, name: str) -> list[dict]:
 # --- provision -----------------------------------------------------------
 
 
+PUBLIC_ACCESS_BLOCK = {
+    "BlockPublicAcls": True,
+    "IgnorePublicAcls": True,
+    "BlockPublicPolicy": True,
+    "RestrictPublicBuckets": True,
+}
+
+
 def ensure_bucket(rig: Rig) -> None:
+    """Create the bucket or confirm this account owns it, then block public
+    access either way, so an existing bucket gets the same protection."""
     s3 = rig.session.client("s3")
     bucket = rig.cfg["s3"]["outputs_bucket"]
     region = rig.cfg["aws"]["region"]
+    account_id = rig.session.client("sts").get_caller_identity()["Account"]
     try:
-        s3.head_bucket(Bucket=bucket)
+        s3.head_bucket(Bucket=bucket, ExpectedBucketOwner=account_id)
         print(f"bucket exists: s3://{bucket}")
-        return
     except ClientError as err:
-        if err.response["Error"]["Code"] not in ("404", "NoSuchBucket"):
+        code = err.response["Error"]["Code"]
+        if code in ("403", "AccessDenied", "Forbidden"):
+            raise SystemExit(
+                f"bucket {bucket} is not owned by account {account_id} or denies access: choose another name"
+            ) from err
+        if code not in ("404", "NoSuchBucket"):
             raise
-    if region == "us-east-1":
-        s3.create_bucket(Bucket=bucket)
-    else:
-        s3.create_bucket(Bucket=bucket, CreateBucketConfiguration={"LocationConstraint": region})
+        if region == "us-east-1":
+            s3.create_bucket(Bucket=bucket)
+        else:
+            s3.create_bucket(Bucket=bucket, CreateBucketConfiguration={"LocationConstraint": region})
+        print(f"created bucket: s3://{bucket}")
     s3.put_public_access_block(
-        Bucket=bucket,
-        PublicAccessBlockConfiguration={
-            "BlockPublicAcls": True,
-            "IgnorePublicAcls": True,
-            "BlockPublicPolicy": True,
-            "RestrictPublicBuckets": True,
-        },
+        Bucket=bucket, ExpectedBucketOwner=account_id, PublicAccessBlockConfiguration=PUBLIC_ACCESS_BLOCK
     )
-    print(f"created bucket: s3://{bucket}")
+    print(f"public access blocked: s3://{bucket}")
 
 
 def instance_policy(cfg: dict, account_id: str) -> dict:
@@ -216,6 +226,20 @@ def resolve_vpc_and_subnet(ec2, cfg: dict) -> tuple[str, str]:
     return vpc_id, sorted(subnets, key=lambda s: s["AvailabilityZone"])[0]["SubnetId"]
 
 
+def check_existing_security_group(cfg: dict, group: dict) -> str:
+    """Reuse an existing group only if it is the rig's and still has no inbound rules."""
+    group_id = group["GroupId"]
+    if not has_rig_tags(instance_tags(group), cfg, resource_names(cfg)["sg"]):
+        raise SystemExit(f"security group {group_id} has the rig's name but not the rig tags: refusing to reuse it")
+    if group.get("IpPermissions"):
+        raise SystemExit(
+            f"security group {group_id} has inbound rules; the rig needs none. "
+            f"Remove them (aws ec2 revoke-security-group-ingress) or run deprovision, then retry."
+        )
+    print(f"security group exists (no inbound rules): {group_id}")
+    return group_id
+
+
 def ensure_security_group(rig: Rig) -> str:
     ec2 = rig.session.client("ec2")
     names = resource_names(rig.cfg)
@@ -227,8 +251,7 @@ def ensure_security_group(rig: Rig) -> str:
         ]
     )["SecurityGroups"]
     if existing:
-        print(f"security group exists: {existing[0]['GroupId']}")
-        return existing[0]["GroupId"]
+        return check_existing_security_group(rig.cfg, existing[0])
     sg = ec2.create_security_group(
         GroupName=names["sg"],
         Description="ComfyUI video rig: no inbound rules, SSM access only",

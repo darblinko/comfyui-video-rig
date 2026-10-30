@@ -143,6 +143,12 @@ def placeholder_instance(cfg: dict) -> dict:
     }
 
 
+def placeholder_group(cfg: dict) -> dict:
+    tags = [{"Key": k, "Value": v} for k, v in cfg.get("tags", {}).items()]
+    name = f"{cfg['rig']['name']}-sg"
+    return {"GroupId": "sg-<rig>", "IpPermissions": [], "Tags": [*tags, {"Key": "Name", "Value": name}]}
+
+
 def placeholder_responses(cfg: dict, *, resources_exist: bool, instance_exists: bool) -> dict:
     """Responses for an account where the rig's bucket, role and SG either all
     exist or none do, with or without the rig instance."""
@@ -163,7 +169,7 @@ def placeholder_responses(cfg: dict, *, resources_exist: bool, instance_exists: 
         "ec2.describe_subnets": {
             "Subnets": [{"SubnetId": "subnet-<first>", "VpcId": "vpc-<default>", "AvailabilityZone": f"{region}a"}]
         },
-        "ec2.describe_security_groups": {"SecurityGroups": [{"GroupId": "sg-<rig>"}] if resources_exist else []},
+        "ec2.describe_security_groups": {"SecurityGroups": [placeholder_group(cfg)] if resources_exist else []},
         "ec2.create_security_group": {"GroupId": "sg-<new>"},
         "ec2.describe_instance_types": {"InstanceTypes": [{"VCpuInfo": {"DefaultVCpus": 0}}]},
         "service-quotas.get_service_quota": placeholder_error("DryRunNoQuotaLookup", "GetServiceQuota"),

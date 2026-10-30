@@ -10,6 +10,7 @@ from launch_rig import (
     cmd_deprovision,
     cmd_terminate,
     delete_security_group,
+    ensure_bucket,
     ensure_security_group,
     find_rig_instance,
     instance_policy,
@@ -89,10 +90,42 @@ def test_security_group_is_created_without_ingress_rules(cfg):
 
 
 def test_existing_security_group_is_reused(cfg):
-    existing = {"ec2.describe_security_groups": {"SecurityGroups": [{"GroupId": "sg-old"}]}}
+    existing = {"ec2.describe_security_groups": {"SecurityGroups": [rig_group(cfg, "sg-old")]}}
     rig = rig_for(cfg, {**DEFAULT_VPC, **SUBNETS, **existing})
     assert ensure_security_group(rig) == "sg-old"
     assert "ec2.create_security_group" not in rig.session.operations()
+
+
+def test_existing_security_group_with_inbound_rules_is_rejected(cfg):
+    ingress = [{"IpProtocol": "tcp", "FromPort": 8188, "ToPort": 8188, "IpRanges": [{"CidrIp": "0.0.0.0/0"}]}]
+    existing = {"ec2.describe_security_groups": {"SecurityGroups": [rig_group(cfg, "sg-open", ingress)]}}
+    rig = rig_for(cfg, {**DEFAULT_VPC, **SUBNETS, **existing})
+    with pytest.raises(SystemExit, match="inbound rules"):
+        ensure_security_group(rig)
+
+
+def test_existing_security_group_without_the_rig_tags_is_rejected(owned_cfg):
+    foreign = {"GroupId": "sg-alice", "Tags": rig_tags({"tags": {"Owner": "alice"}}, "x"), "IpPermissions": []}
+    rig = rig_for(owned_cfg, {**DEFAULT_VPC, **SUBNETS, "ec2.describe_security_groups": {"SecurityGroups": [foreign]}})
+    with pytest.raises(SystemExit, match="rig tags"):
+        ensure_security_group(rig)
+
+
+def test_existing_bucket_is_checked_for_owner_and_gets_the_public_access_block(cfg):
+    rig = rig_for(cfg, {"sts.get_caller_identity": {"Account": "111122223333"}})
+    ensure_bucket(rig)
+    assert rig.session.kwargs_of("s3.head_bucket") == [{"Bucket": TEST_BUCKET, "ExpectedBucketOwner": "111122223333"}]
+    block = rig.session.kwargs_of("s3.put_public_access_block")
+    assert block and all(block[0]["PublicAccessBlockConfiguration"].values())
+    assert "s3.create_bucket" not in rig.session.operations()
+
+
+def test_bucket_owned_by_another_account_stops_the_command(cfg):
+    responses = {"sts.get_caller_identity": {"Account": "111122223333"}, "s3.head_bucket": client_error("403")}
+    rig = rig_for(cfg, responses)
+    with pytest.raises(SystemExit, match="not owned"):
+        ensure_bucket(rig)
+    assert "s3.put_public_access_block" not in rig.session.operations()
 
 
 def test_run_instance_waits_for_profile_propagation(cfg):
