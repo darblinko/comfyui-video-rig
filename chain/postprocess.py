@@ -24,7 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "runner"))
 from media import COMPARE_HEIGHT
-from run_chain import REPO_DIR, load_spec, stage_dir
+from run_chain import REPO_DIR, load_spec, segment_digest, stage_dir
 
 # The voiceover is padded with silence to the measured video length
 # (apad=whole_dur) and -shortest then cuts a longer voiceover at the last frame,
@@ -101,13 +101,22 @@ def compare_command(
     return ffmpeg_command(*inputs, "-filter_complex", stack, "-map", "[v]", *video, *audio, str(out))
 
 
-def check_lineage(model: str, chain: list[tuple[int, dict]], segment_count: int) -> None:
-    """Exit unless the chain holds segments 1..segment_count and each one was
-    generated after, and from the last frame of, the segment before it."""
+def check_lineage(model: str, chain: list[tuple[int, dict]], segment_count: int, job_digest=None) -> None:
+    """Exit unless the chain holds exactly segments 1..segment_count, each one
+    generated after, and from the last frame of, the segment before it, and
+    (when job_digest is given) each one from the current spec's segment job."""
     present = {record["segment"] for _, record in chain}
     missing = [seg for seg in range(1, segment_count + 1) if seg not in present]
     if missing:
         raise SystemExit(f"{model}: missing segment {', '.join(map(str, missing))}; rerun run_chain.py")
+    extra = sorted(seg for seg in present if not 1 <= seg <= segment_count)
+    if extra:
+        raise SystemExit(
+            f"{model}: segment {', '.join(map(str, extra))} not in the spec ({segment_count} beats); "
+            f"remove those records from chain_state.json or rerun run_chain.py"
+        )
+    if job_digest is not None:
+        check_spec_revision(model, chain, job_digest)
     for (prev_index, prev), (index, record) in itertools.pairwise(chain):
         seg = record["segment"]
         if index < prev_index:
@@ -117,15 +126,30 @@ def check_lineage(model: str, chain: list[tuple[int, dict]], segment_count: int)
             raise SystemExit(f"{model} segment {seg} started from {start}, not segment {seg - 1}'s last frame")
 
 
-def segments_by_model(state: list[dict], segment_count: int, repo_dir: Path = REPO_DIR) -> dict[str, list[Path]]:
+def check_spec_revision(model: str, chain: list[tuple[int, dict]], job_digest) -> None:
+    for _, record in chain:
+        seg = record["segment"]
+        recorded = record.get("job_sha256")
+        if recorded is None:
+            print(f"WARNING: {model} segment {seg} has no recorded job digest; its match with the spec is not checked")
+        elif recorded != job_digest(model, seg):
+            raise SystemExit(
+                f"{model} segment {seg} was generated from another revision of the spec; rerun from segment {seg}"
+            )
+
+
+def segments_by_model(
+    state: list[dict], segment_count: int, repo_dir: Path = REPO_DIR, job_digest=None
+) -> dict[str, list[Path]]:
     """Latest raw clip for each (model, segment), in segment order, after
-    checking that the segments form one complete chain."""
+    checking that the segments form one complete chain. job_digest(model, seg)
+    gives the current spec's segment job digest."""
     latest = {(record["model"], record["segment"]): (index, record) for index, record in enumerate(state)}
     models = dict.fromkeys(model for model, _ in latest)
     result = {}
     for model in models:
         chain = [latest[key] for key in sorted(k for k in latest if k[0] == model)]
-        check_lineage(model, chain, segment_count)
+        check_lineage(model, chain, segment_count, job_digest)
         result[model] = [repo_dir / record["raw"] for _, record in chain]
     return result
 
@@ -174,7 +198,9 @@ def main(argv: list[str] | None = None, run=subprocess.run) -> None:
         print(f"no voiceover at {spec['voiceover']}: outputs are silent")
         voiceover = None
 
-    segments = segments_by_model(state, len(spec["beats"]))
+    segments = segments_by_model(
+        state, len(spec["beats"]), job_digest=lambda model, seg: segment_digest(spec, model, seg)
+    )
     joined = {}
     for model, parts in segments.items():
         joined[model] = build_model_clips(model, parts, out_dir, voiceover, spec["segment_seconds"], run)

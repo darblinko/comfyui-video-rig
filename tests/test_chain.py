@@ -21,6 +21,7 @@ from run_chain import (
     load_spec,
     record_segment,
     segment_start_image,
+    segment_digest,
     segment_toml,
 )
 
@@ -168,6 +169,32 @@ def test_postprocess_rejects_a_segment_that_started_from_another_frame():
         segments_by_model(state, 2)
 
 
+def test_postprocess_rejects_segments_beyond_the_spec():
+    state = [seg_record(n, f"s{n}.mp4") for n in (1, 2, 3, 4)]
+    with pytest.raises(SystemExit, match=r"wan22: segment 3, 4 not in the spec"):
+        segments_by_model(state, 2)
+
+
+def test_postprocess_rejects_a_segment_from_another_spec_revision(spec):
+    state = [{**seg_record(n, f"s{n}.mp4"), "job_sha256": segment_digest(spec, "wan22", n)} for n in (1, 2)]
+    changed = {**spec, "beats": [spec["beats"][0], "a different beat"]}
+    digest = lambda model, seg: segment_digest(changed, model, seg)  # noqa: E731
+    with pytest.raises(SystemExit, match="wan22 segment 2 was generated from another revision"):
+        segments_by_model(state, 2, job_digest=digest)
+
+
+def test_postprocess_accepts_segments_of_the_current_spec(spec):
+    state = [{**seg_record(n, f"s{n}.mp4"), "job_sha256": segment_digest(spec, "wan22", n)} for n in (1, 2)]
+    digest = lambda model, seg: segment_digest(spec, model, seg)  # noqa: E731
+    assert len(segments_by_model(state, 2, job_digest=digest)["wan22"]) == 2
+
+
+def test_postprocess_warns_about_segments_without_a_digest(spec, capsys):
+    state = [seg_record(n, f"s{n}.mp4") for n in (1, 2)]
+    segments_by_model(state, 2, job_digest=lambda model, seg: segment_digest(spec, model, seg))
+    assert "no recorded job digest" in capsys.readouterr().out
+
+
 def test_run_model_chain_records_the_start_image_and_invalidates_downstream(spec, tmp_path, monkeypatch):
     monkeypatch.setattr(run_chain, "REPO_DIR", tmp_path)
     stage = tmp_path / "outputs" / spec["name"]
@@ -188,6 +215,7 @@ def test_run_model_chain_records_the_start_image_and_invalidates_downstream(spec
     state = json.loads((stage / "chain_state.json").read_text())
     assert [(r["segment"], r["raw"]) for r in state] == [(1, "old1.mp4"), (2, "new2.mp4")]
     assert state[1]["start_image"] == "outputs/headphones_test/wan22_seg1_last.png"
+    assert state[1]["job_sha256"] == segment_digest(spec, "wan22", 2)
 
 
 def test_concat_list_uses_absolute_paths(tmp_path):

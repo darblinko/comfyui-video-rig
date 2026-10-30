@@ -21,6 +21,7 @@ and later from chain_state.json, so the state never mixes generations.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
@@ -84,6 +85,13 @@ def segment_toml(spec: dict, model: str, seg: int) -> str:
         f"resolution = [{width}, {height}]\n"
         f"seed = {spec['seed_base'] + seg}\n"
     )
+
+
+def segment_digest(spec: dict, model: str, seg: int) -> str:
+    """sha256 of the segment's job TOML without its comment header (prompt, seed,
+    start image, length, size), which postprocess.py compares with the current spec."""
+    lines = [line for line in segment_toml(spec, model, seg).splitlines() if not line.startswith("#")]
+    return hashlib.sha256("\n".join(lines).encode()).hexdigest()
 
 
 def run_job_command(job_toml: Path, result_file: Path) -> list[str]:
@@ -179,6 +187,7 @@ def run_model_chain(spec: dict, model: str, start_seg: int) -> None:
             "model": model,
             "segment": seg,
             "start_image": start_rel,
+            "job_sha256": segment_digest(spec, model, seg),
             "raw": repo_relative(raw, REPO_DIR),
             "last_frame": repo_relative(last_png, REPO_DIR),
         }
