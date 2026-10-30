@@ -1,7 +1,7 @@
 # Step 2: harmonize a rough paste-up (real product photo composited onto a
 # persona scene) into a photoreal start frame. The mask protects the product
 # pixels: BLACK over the product, WHITE where FLUX may repaint (edges, hands,
-# lighting). See the main README for making the paste-up with ImageMagick.
+# lighting). See products/README.md for making the paste-up and mask with ffmpeg.
 #
 # Run: python3 runner/run_job.py jobs/examples/start_frame.toml
 

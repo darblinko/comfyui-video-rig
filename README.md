@@ -95,7 +95,7 @@ Source: `results/manifests/*.json`, chart `still-time` in `docs/data.json`.
 Requires Python 3.11 or later and [uv](https://docs.astral.sh/uv/). The dry runs need no AWS credentials and make no network calls.
 
 ```bash
-git clone <this repo> comfyui-video-rig && cd comfyui-video-rig
+git clone https://github.com/Nysara-Global-LLC/comfyui-video-rig && cd comfyui-video-rig
 uv sync --group dev
 uv run pytest -q
 uv run python launch_rig.py --dry-run launch
@@ -120,7 +120,7 @@ Other commands: `status`, `start`, `terminate` (deletes the instance and its vol
 
 ### Start frame
 
-`jobs/examples/start_frame.toml` repaints a rough composite with FLUX.1-dev while a mask protects one region. Put the composite and mask in `products/pasteups/`. Black in the mask is kept and white is repainted: after decoding, the workflow composites the original pixels back through the mask, so black regions are the input pixels rather than a VAE round trip. The mask must have the same dimensions as the composite. This path has no recorded run; see Limitations.
+`jobs/examples/start_frame.toml` repaints a rough composite with FLUX.1-dev while a mask protects one region. Put the composite and mask in `products/pasteups/`; [`products/README.md`](products/README.md) has the ffmpeg commands that make both. Black in the mask is kept and white is repainted: after decoding, the workflow composites the original pixels back through the mask, so black regions are the input pixels rather than a VAE round trip. The mask must have the same dimensions as the composite. This path has no recorded run; see Limitations.
 
 ### Chained clips
 
