@@ -31,10 +31,10 @@ select = ["E", "W", "F", "I", "N", "UP", "B", "SIM", "RUF"]
 # The scripts import each other by module name (runner/ is on sys.path), so
 # list them as first-party for a stable import order.
 known-first-party = [
-    "comfy_client", "conftest", "dry_run", "launch_rig", "media", "postprocess", "rig_config", "run_chain",
+    "comfy_client", "conftest", "download_models", "dry_run", "launch_rig", "media", "postprocess", "rig_config", "run_chain",
     "run_job", "s3_sync", "summarize",
 ]
 
 [tool.pytest.ini_options]
-pythonpath = [".", "runner", "chain", "results"]
+pythonpath = [".", "runner", "chain", "results", "bootstrap"]
 testpaths = ["tests"]
