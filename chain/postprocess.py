@@ -16,6 +16,7 @@ re-encoded. ffmpeg must be on PATH.
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import subprocess
 import sys
@@ -63,11 +64,33 @@ def compare_command(left: Path, right: Path, out: Path, voiceover: Path | None) 
     return ffmpeg_command(*inputs, "-filter_complex", stack, "-map", "[v]", *video, *audio, str(out))
 
 
-def segments_by_model(state: list[dict], repo_dir: Path = REPO_DIR) -> dict[str, list[Path]]:
-    """Latest raw clip for each (model, segment), in segment order."""
-    latest = {(record["model"], record["segment"]): repo_dir / record["raw"] for record in state}
+def check_lineage(model: str, chain: list[tuple[int, dict]], segment_count: int) -> None:
+    """Exit unless the chain holds segments 1..segment_count and each one was
+    generated after, and from the last frame of, the segment before it."""
+    present = {record["segment"] for _, record in chain}
+    missing = [seg for seg in range(1, segment_count + 1) if seg not in present]
+    if missing:
+        raise SystemExit(f"{model}: missing segment {', '.join(map(str, missing))}; rerun run_chain.py")
+    for (prev_index, prev), (index, record) in itertools.pairwise(chain):
+        seg = record["segment"]
+        if index < prev_index:
+            raise SystemExit(f"{model} segment {seg} was generated before segment {seg - 1}; rerun from segment {seg}")
+        start = record.get("start_image")
+        if start is not None and start != prev.get("last_frame"):
+            raise SystemExit(f"{model} segment {seg} started from {start}, not segment {seg - 1}'s last frame")
+
+
+def segments_by_model(state: list[dict], segment_count: int, repo_dir: Path = REPO_DIR) -> dict[str, list[Path]]:
+    """Latest raw clip for each (model, segment), in segment order, after
+    checking that the segments form one complete chain."""
+    latest = {(record["model"], record["segment"]): (index, record) for index, record in enumerate(state)}
     models = dict.fromkeys(model for model, _ in latest)
-    return {model: [latest[key] for key in sorted(k for k in latest if k[0] == model)] for model in models}
+    result = {}
+    for model in models:
+        chain = [latest[key] for key in sorted(k for k in latest if k[0] == model)]
+        check_lineage(model, chain, segment_count)
+        result[model] = [repo_dir / record["raw"] for _, record in chain]
+    return result
 
 
 def join_and_voice(parts: list[Path], out_dir: Path, name: str, voiceover: Path | None, offset: float, run) -> Path:
@@ -103,7 +126,7 @@ def main(argv: list[str] | None = None, run=subprocess.run) -> None:
         print(f"no voiceover at {spec['voiceover']}: outputs are silent")
         voiceover = None
 
-    segments = segments_by_model(state)
+    segments = segments_by_model(state, len(spec["beats"]))
     joined = {}
     for model, parts in segments.items():
         joined[model] = build_model_clips(model, parts, out_dir, voiceover, spec["segment_seconds"], run)

@@ -12,6 +12,9 @@ comparison stays like for like.
 Each segment is an ordinary run_job.py job: its TOML is written to
 <spec dir>/generated/, and the extracted last frames and chain_state.json go to
 outputs/<name>/. ffmpeg must be on PATH.
+
+Starting or resuming at segment n drops that model's records for segment n
+and later from chain_state.json, so the state never mixes generations.
 """
 
 from __future__ import annotations
@@ -133,9 +136,22 @@ def extract_last_frame(video: Path, out_png: Path, run=subprocess.run) -> None:
         raise RuntimeError(f"last-frame extraction produced nothing: {out_png.name}")
 
 
-def append_state(state_file: Path, record: dict) -> None:
-    state = json.loads(state_file.read_text()) if state_file.exists() else []
-    state_file.write_text(json.dumps([*state, record], indent=2) + "\n")
+def drop_from(state: list[dict], model: str, seg: int) -> list[dict]:
+    """State without this model's records for segment seg and later: they
+    were generated from a start frame that is about to be replaced."""
+    return [record for record in state if record["model"] != model or record["segment"] < seg]
+
+
+def record_segment(state: list[dict], record: dict) -> list[dict]:
+    return [*drop_from(state, record["model"], record["segment"]), record]
+
+
+def load_state(state_file: Path) -> list[dict]:
+    return json.loads(state_file.read_text()) if state_file.exists() else []
+
+
+def save_state(state_file: Path, state: list[dict]) -> None:
+    state_file.write_text(json.dumps(state, indent=2) + "\n")
 
 
 def repo_relative(path: Path, repo_dir: Path = REPO_DIR) -> str:
@@ -143,16 +159,24 @@ def repo_relative(path: Path, repo_dir: Path = REPO_DIR) -> str:
 
 
 def run_model_chain(spec: dict, model: str, start_seg: int) -> None:
-    stage = stage_dir(spec)
+    stage = stage_dir(spec, REPO_DIR)
+    state_file = stage / "chain_state.json"
     for seg in range(start_seg, len(spec["beats"]) + 1):
-        start_image = REPO_DIR / segment_start_image(spec, model, seg)
-        if not start_image.exists():
-            raise RuntimeError(f"missing start image {segment_start_image(spec, model, seg)}")
+        start_rel = segment_start_image(spec, model, seg)
+        if not (REPO_DIR / start_rel).exists():
+            raise RuntimeError(f"missing start image {start_rel}")
+        save_state(state_file, drop_from(load_state(state_file), model, seg))
         raw = run_segment(spec, model, seg)
         last_png = stage / f"{model}_seg{seg}_last.png"
         extract_last_frame(raw, last_png)
-        record = {"model": model, "segment": seg, "raw": repo_relative(raw), "last_frame": repo_relative(last_png)}
-        append_state(stage / "chain_state.json", record)
+        record = {
+            "model": model,
+            "segment": seg,
+            "start_image": start_rel,
+            "raw": repo_relative(raw, REPO_DIR),
+            "last_frame": repo_relative(last_png, REPO_DIR),
+        }
+        save_state(state_file, record_segment(load_state(state_file), record))
         print(f"=== chain: {model} segment {seg} done: {record['raw']}", flush=True)
 
 

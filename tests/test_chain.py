@@ -1,3 +1,4 @@
+import json
 import subprocess
 import tomllib
 from pathlib import Path
@@ -7,7 +8,14 @@ import pytest
 import run_chain
 from conftest import REPO_DIR
 from postprocess import build_model_clips, compare_command, concat_list, segments_by_model
-from run_chain import last_frame_command, load_spec, run_folder_from_output, segment_start_image, segment_toml
+from run_chain import (
+    last_frame_command,
+    load_spec,
+    record_segment,
+    run_folder_from_output,
+    segment_start_image,
+    segment_toml,
+)
 
 SPEC_PATH = REPO_DIR / "jobs" / "headphones_test" / "chain.toml"
 
@@ -94,10 +102,67 @@ def test_resumed_segments_replace_earlier_records():
         {"model": "wan22", "segment": 1, "raw": "outputs/a/s1.mp4"},
         {"model": "wan22", "segment": 2, "raw": "outputs/a/new.mp4"},
         {"model": "hunyuan15", "segment": 1, "raw": "outputs/b/s1.mp4"},
+        {"model": "hunyuan15", "segment": 2, "raw": "outputs/b/s2.mp4"},
     ]
-    segments = segments_by_model(state, repo_dir=Path("/repo"))
+    segments = segments_by_model(state, 2, repo_dir=Path("/repo"))
     assert segments["wan22"] == [Path("/repo/outputs/a/s1.mp4"), Path("/repo/outputs/a/new.mp4")]
     assert list(segments) == ["wan22", "hunyuan15"]
+
+
+def seg_record(seg: int, raw: str) -> dict:
+    return {"model": "wan22", "segment": seg, "raw": raw, "last_frame": f"f{seg}.png", "start_image": f"f{seg - 1}.png"}
+
+
+def test_regenerating_a_segment_drops_the_records_downstream_of_it():
+    state = [seg_record(1, "s1.mp4"), seg_record(2, "s2.mp4"), seg_record(3, "s3.mp4"), seg_record(4, "s4.mp4")]
+    state = record_segment(state, seg_record(2, "s2-new.mp4"))
+    assert [(r["segment"], r["raw"]) for r in state] == [(1, "s1.mp4"), (2, "s2-new.mp4")]
+
+
+def test_other_models_keep_their_records_when_one_is_regenerated():
+    other = {**seg_record(3, "h3.mp4"), "model": "hunyuan15"}
+    assert record_segment([other], seg_record(2, "s2.mp4")) == [other, seg_record(2, "s2.mp4")]
+
+
+def test_postprocess_rejects_a_chain_with_a_missing_segment():
+    state = [seg_record(1, "s1.mp4"), seg_record(2, "s2.mp4"), seg_record(4, "s4.mp4")]
+    with pytest.raises(SystemExit, match=r"wan22.*missing segment 3"):
+        segments_by_model(state, 4)
+
+
+def test_postprocess_rejects_a_segment_older_than_the_one_it_continues():
+    old_three = seg_record(3, "s3-old.mp4")
+    state = [seg_record(1, "s1.mp4"), old_three, seg_record(2, "s2-new.mp4")]
+    with pytest.raises(SystemExit, match="wan22 segment 3 was generated before segment 2"):
+        segments_by_model(state, 3)
+
+
+def test_postprocess_rejects_a_segment_that_started_from_another_frame():
+    state = [seg_record(1, "s1.mp4"), {**seg_record(2, "s2.mp4"), "start_image": "elsewhere.png"}]
+    with pytest.raises(SystemExit, match=r"wan22 segment 2 started from elsewhere\.png"):
+        segments_by_model(state, 2)
+
+
+def test_run_model_chain_records_the_start_image_and_invalidates_downstream(spec, tmp_path, monkeypatch):
+    monkeypatch.setattr(run_chain, "REPO_DIR", tmp_path)
+    stage = tmp_path / "outputs" / spec["name"]
+    stage.mkdir(parents=True)
+    (stage / "wan22_seg1_last.png").write_bytes(b"png")
+    old = [seg_record(n, f"old{n}.mp4") for n in (1, 2, 3, 4)]
+    (stage / "chain_state.json").write_text(json.dumps(old))
+    monkeypatch.setattr(run_chain, "run_segment", lambda _spec, _model, seg: tmp_path / f"new{seg}.mp4")
+
+    def fake_extract(_video, out_png):
+        out_png.write_bytes(b"png")
+        if out_png.name == "wan22_seg3_last.png":
+            raise RuntimeError("segment 3 frame extraction failed")
+
+    monkeypatch.setattr(run_chain, "extract_last_frame", fake_extract)
+    with pytest.raises(RuntimeError, match="segment 3"):
+        run_chain.run_model_chain({**spec, "spec_dir": tmp_path}, "wan22", 2)
+    state = json.loads((stage / "chain_state.json").read_text())
+    assert [(r["segment"], r["raw"]) for r in state] == [(1, "old1.mp4"), (2, "new2.mp4")]
+    assert state[1]["start_image"] == "outputs/headphones_test/wan22_seg1_last.png"
 
 
 def test_concat_list_uses_absolute_paths(tmp_path):
