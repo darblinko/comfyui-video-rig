@@ -1,7 +1,10 @@
 outputs/*
 !outputs/.gitkeep
 .rig_state.json
-__pycache__/
-*.pyc
 share_links.txt
 .env
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.venv/
