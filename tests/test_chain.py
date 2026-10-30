@@ -11,6 +11,7 @@ from postprocess import (
     build_model_clips,
     compare_command,
     concat_list,
+    mux_command,
     duration_command,
     parse_progress_duration,
     segments_by_model,
@@ -176,6 +177,15 @@ def test_concat_list_uses_absolute_paths(tmp_path):
     assert concat_list([tmp_path / "a.mp4"]) == f"file '{tmp_path / 'a.mp4'}'\n"
 
 
+def test_voiceover_is_padded_so_the_video_sets_the_length():
+    mux = mux_command(Path("v.mp4"), Path("vo.mp3"), Path("o.mp4"), 20.25)
+    assert mux[mux.index("-af") + 1] == "apad=whole_dur=20.250000"
+    assert "-shortest" in mux
+    compare = compare_command(Path("w.mp4"), Path("h.mp4"), Path("c.mp4"), Path("vo.mp3"), 20.25)
+    assert compare[compare.index("-filter_complex") + 1].endswith(";[2:a]apad=whole_dur=20.250000[a]")
+    assert compare[compare.index("-map", compare.index("[v]")) + 1] == "[a]"
+
+
 def test_model_clips_split_the_chain_and_offset_the_voiceover(tmp_path):
     commands = []
     parts = [tmp_path / f"s{i}.mp4" for i in range(1, 5)]
@@ -188,7 +198,7 @@ def test_model_clips_split_the_chain_and_offset_the_voiceover(tmp_path):
     record = lambda cmd, **_k: commands.append(cmd)  # noqa: E731
     joined = build_model_clips("wan22", parts, tmp_path, Path("vo.mp3"), 5, record, measure=measure)
     assert joined == tmp_path / "wan22_joined_20s_v.mp4"
-    assert measured == [tmp_path / "wan22_clip1_10s_v.mp4"]
+    assert measured == [tmp_path / f"wan22_{name}_v.mp4" for name in ("clip1_10s", "clip2_10s", "joined_20s")]
     outputs = [cmd[-1] for cmd in commands]
     assert outputs == [
         str(tmp_path / "wan22_clip1_10s_v.mp4"),
@@ -229,9 +239,10 @@ def test_silent_model_clips_skip_the_mux(tmp_path):
 
 
 def test_comparison_with_voiceover_maps_the_audio_track():
-    cmd = compare_command(Path("w.mp4"), Path("h.mp4"), Path("c.mp4"), Path("vo.mp3"))
-    assert cmd[cmd.index("-filter_complex") + 1] == "[0:v]scale=-2:720[l];[1:v]scale=-2:720[r];[l][r]hstack[v]"
-    assert "2:a" in cmd
+    cmd = compare_command(Path("w.mp4"), Path("h.mp4"), Path("c.mp4"), Path("vo.mp3"), 20.25)
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    assert graph.startswith("[0:v]scale=-2:720[l];[1:v]scale=-2:720[r];[l][r]hstack[v];[2:a]")
+    assert "[a]" in cmd
     assert "-an" not in cmd
 
 

@@ -33,9 +33,9 @@ def make_segment(path: Path, frames: int, fps: int) -> Path:
     return path
 
 
-def make_voiceover(path: Path) -> Path:
-    """Silence until TONE_START_S, then a 440 Hz tone, 25 s in total."""
-    tone = f"aevalsrc=if(gte(t\\,{TONE_START_S})\\,0.5*sin(2*PI*440*t)\\,0):s=48000:d=25"
+def make_voiceover(path: Path, seconds: float = 25) -> Path:
+    """Silence until TONE_START_S, then a 440 Hz tone, 25 s in total by default."""
+    tone = f"aevalsrc=if(gte(t\\,{TONE_START_S})\\,0.5*sin(2*PI*440*t)\\,0):s=48000:d={seconds}"
     ffmpeg("-f", "lavfi", "-i", tone, "-c:a", "aac", str(path))
     return path
 
@@ -120,3 +120,17 @@ def test_runner_side_by_side_is_720_high(tmp_path):
     clips = [make_segment(tmp_path / f"{name}.mp4", 17, 16) for name in ("a", "b")]
     subprocess.run(side_by_side_command(clips, tmp_path / "c.mp4"), check=True, capture_output=True)
     assert video_size(tmp_path / "c.mp4")[1] == 720
+
+
+def test_short_voiceover_keeps_the_whole_video(tmp_path):
+    parts = [make_segment(tmp_path / f"s{i}.mp4", 81, 16) for i in range(1, 5)]
+    voiceover = make_voiceover(tmp_path / "vo.m4a", seconds=3)
+    out = tmp_path / "out"
+    out.mkdir()
+    build_model_clips("wan22", parts, out, voiceover, 5, subprocess.run)
+    assert decoded_frames(out / "wan22_joined_20s.mp4") == 4 * 81
+    assert decoded_frames(out / "wan22_clip2_10s.mp4") == 2 * 81
+    compare = tmp_path / "c.mp4"
+    subprocess.run(compare_command(parts[0], parts[1], compare, voiceover, 5.0625), check=True, timeout=60)
+    assert decoded_frames(compare) == 81
+

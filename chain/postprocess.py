@@ -26,6 +26,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "runner"))
 from media import COMPARE_HEIGHT
 from run_chain import REPO_DIR, load_spec, stage_dir
 
+# The voiceover is padded with silence to the measured video length
+# (apad=whole_dur) and -shortest then cuts a longer voiceover at the last frame,
+# so the video always keeps its full length. An unbounded apad with a
+# stream-copied video never ends: ffmpeg 7.0.2 hangs and ignores SIGTERM.
 AUDIO_OUTPUT = ["-c:a", "aac", "-b:a", "128k", "-shortest"]
 
 
@@ -43,10 +47,14 @@ def concat_command(list_file: Path, out: Path) -> list[str]:
     return ffmpeg_command("-f", "concat", "-safe", "0", "-i", str(list_file), "-c", "copy", str(out))
 
 
-def mux_command(video: Path, voiceover: Path, out: Path, audio_offset: float = 0.0) -> list[str]:
+def pad_filter(video_seconds: float) -> str:
+    return f"apad=whole_dur={video_seconds:.6f}"
+
+
+def mux_command(video: Path, voiceover: Path, out: Path, video_seconds: float, audio_offset: float = 0.0) -> list[str]:
     return ffmpeg_command(
         "-i", str(video), "-ss", str(audio_offset), "-i", str(voiceover),
-        "-map", "0:v", "-map", "1:a", "-c:v", "copy", *AUDIO_OUTPUT, str(out),
+        "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-af", pad_filter(video_seconds), *AUDIO_OUTPUT, str(out),
     )  # fmt: skip
 
 
@@ -70,16 +78,21 @@ def measure_duration(video: Path, run) -> float:
     return parse_progress_duration(proc.stdout)
 
 
-def compare_command(left: Path, right: Path, out: Path, voiceover: Path | None) -> list[str]:
+def compare_command(
+    left: Path, right: Path, out: Path, voiceover: Path | None, video_seconds: float | None = None
+) -> list[str]:
     """Scale both clips to the same height, stack them left to right and
-    re-encode; add the voiceover track when there is one."""
+    re-encode; add the voiceover track, padded to video_seconds, when there is one."""
     h = COMPARE_HEIGHT
     stack = f"[0:v]scale=-2:{h}[l];[1:v]scale=-2:{h}[r];[l][r]hstack[v]"
     inputs = ["-i", str(left), "-i", str(right)]
     audio = ["-an"]
     if voiceover is not None:
         inputs += ["-i", str(voiceover)]
-        audio = ["-map", "2:a", *AUDIO_OUTPUT]
+        if video_seconds is None:
+            raise ValueError("a voiceover needs the video length to pad to")
+        stack += f";[2:a]{pad_filter(video_seconds)}[a]"
+        audio = ["-map", "[a]", *AUDIO_OUTPUT]
     video = ["-c:v", "libx264", "-crf", "19", "-pix_fmt", "yuv420p", "-movflags", "+faststart"]
     return ffmpeg_command(*inputs, "-filter_complex", stack, "-map", "[v]", *video, *audio, str(out))
 
@@ -113,15 +126,20 @@ def segments_by_model(state: list[dict], segment_count: int, repo_dir: Path = RE
     return result
 
 
-def join_and_voice(parts: list[Path], out_dir: Path, name: str, voiceover: Path | None, offset: float, run) -> Path:
-    """Concat parts into <name>_v.mp4; with a voiceover also write <name>.mp4."""
+def join_and_voice(
+    parts: list[Path], out_dir: Path, name: str, voiceover: Path | None, offset: float, run, measure
+) -> tuple[Path, float | None]:
+    """Concat parts into <name>_v.mp4; with a voiceover also measure it and
+    write <name>.mp4. Returns the silent clip and its measured length."""
     silent = out_dir / f"{name}_v.mp4"
     list_file = silent.with_suffix(".txt")
     list_file.write_text(concat_list(parts))
     run(concat_command(list_file, silent), check=True)
-    if voiceover is not None:
-        run(mux_command(silent, voiceover, out_dir / f"{name}.mp4", offset), check=True)
-    return silent
+    if voiceover is None:
+        return silent, None
+    seconds = measure(silent, run)
+    run(mux_command(silent, voiceover, out_dir / f"{name}.mp4", seconds, offset), check=True)
+    return silent, seconds
 
 
 def build_model_clips(
@@ -132,11 +150,11 @@ def build_model_clips(
     segment of 81 frames at 16 fps runs 5.0625 s, not 5 s."""
     half = len(parts) // 2
     first_seconds = half * seconds
-    first = join_and_voice(parts[:half], out_dir, f"{model}_clip1_{first_seconds}s", voiceover, 0.0, run)
-    offset = measure(first, run) if voiceover is not None else 0.0
+    _, offset = join_and_voice(parts[:half], out_dir, f"{model}_clip1_{first_seconds}s", voiceover, 0.0, run, measure)
     rest_seconds = (len(parts) - half) * seconds
-    join_and_voice(parts[half:], out_dir, f"{model}_clip2_{rest_seconds}s", voiceover, offset, run)
-    return join_and_voice(parts, out_dir, f"{model}_joined_{len(parts) * seconds}s", voiceover, 0.0, run)
+    join_and_voice(parts[half:], out_dir, f"{model}_clip2_{rest_seconds}s", voiceover, offset or 0.0, run, measure)
+    joined, _ = join_and_voice(parts, out_dir, f"{model}_joined_{len(parts) * seconds}s", voiceover, 0.0, run, measure)
+    return joined
 
 
 def main(argv: list[str] | None = None, run=subprocess.run) -> None:
@@ -163,7 +181,8 @@ def main(argv: list[str] | None = None, run=subprocess.run) -> None:
     (left_model, left), (_, right) = list(joined.items())[:2]
     seconds = len(segments[left_model]) * spec["segment_seconds"]
     out = out_dir / f"compare_side_by_side_{seconds}s.mp4"
-    run(compare_command(left, right, out, voiceover), check=True)
+    video_seconds = max(measure_duration(left, run), measure_duration(right, run)) if voiceover else None
+    run(compare_command(left, right, out, voiceover, video_seconds), check=True)
     print(f"side-by-side built: {out.relative_to(REPO_DIR)}", flush=True)
 
 
