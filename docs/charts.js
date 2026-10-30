@@ -10,6 +10,8 @@
 //   point with no neighbour is drawn as a dot, the end label uses the last non-null value.
 // stats: tiles [{label, value (preformatted string), note?}].
 // At most 4 series are drawn. A chart that fails to draw shows its own error in its figure.
+// Values, max, min and threshold must be finite numbers (values may be null where noted);
+// an explicit max must be positive. A domain whose largest value is 0 is drawn as 0 to 1.
 (function () {
   "use strict";
 
@@ -112,10 +114,50 @@
     target.addEventListener("blur", hide);
   }
 
+  function isNumber(value) { return typeof value === "number" && isFinite(value); }
+
+  function requireNumber(value, what, allowNull) {
+    if (allowNull && (value === null || value === undefined)) return;
+    if (!isNumber(value)) throw new Error(what + " is not a finite number");
+  }
+
+  function requireList(value, what) {
+    if (!Array.isArray(value)) throw new Error(what + " is not a list");
+    return value;
+  }
+
+  // Rejects data that would otherwise draw NaN coordinates without any visible error.
+  function validate(chart) {
+    if (chart.max !== undefined) {
+      requireNumber(chart.max, "max");
+      if (chart.max <= 0 && chart.type !== "line") throw new Error("max must be positive");
+    }
+    if (chart.min !== undefined) requireNumber(chart.min, "min");
+    if (chart.threshold) requireNumber(chart.threshold.value, "threshold value");
+    if (chart.type === "hbar") {
+      if (!requireList(chart.data, "data").length) throw new Error("data is empty");
+      chart.data.forEach(function (row, i) {
+        if (typeof row.label !== "string") throw new Error("data[" + i + "].label is not a string");
+        requireNumber(row.value, "data[" + i + "].value");
+      });
+    }
+    if (chart.type === "columns" || chart.type === "line") {
+      var keys = requireList(chart.type === "columns" ? chart.categories : chart.x, chart.type === "columns" ? "categories" : "x");
+      requireList(chart.series, "series").forEach(function (s, si) {
+        if (requireList(s.values, "series[" + si + "].values").length !== keys.length) {
+          throw new Error("series[" + si + "] has " + s.values.length + " values for " + keys.length + " keys");
+        }
+        s.values.forEach(function (v, i) { requireNumber(v, "series[" + si + "].values[" + i + "]", true); });
+      });
+    }
+    if (chart.type === "stats") requireList(chart.tiles, "tiles");
+  }
+
   function renderHbar(chart, svg, tip, width) {
     var style = chart.format, rows = chart.data, stacked = width < NARROW;
     var labelW = stacked ? 0 : Math.min(240, Math.max.apply(null, rows.map(function (r) { return r.label.length * 7.3; })) + 12);
     var domainMax = chart.max || Math.max.apply(null, rows.map(function (r) { return r.value; })) * 1.1;
+    if (!(domainMax > 0)) domainMax = 1;
     var labelGap = stacked ? 18 : 0;
     var x0 = labelW, x1 = width - 96, scale = (x1 - x0) / domainMax, band = 36 + labelGap, thick = 20, top = 22;
     var bottom = top + band * rows.length;
@@ -316,6 +358,7 @@
     figure.replaceChildren();
     html("p", { class: "chart-title", text: chart.title }, figure);
     if (chart.subtitle) html("p", { class: "chart-subtitle", text: chart.subtitle }, figure);
+    validate(chart);
     addLegend(chart, figure);
     if (chart.type === "stats") {
       renderStats(chart, figure);
@@ -345,7 +388,8 @@
 
   function loadData() {
     var inline = document.getElementById("chart-data");
-    if (inline) return Promise.resolve(JSON.parse(inline.textContent));
+    // Parsed inside the promise chain so malformed JSON reaches the loading error handler.
+    if (inline) return Promise.resolve(inline.textContent).then(JSON.parse);
     return fetch("data.json").then(function (response) {
       if (!response.ok) throw new Error("data.json: HTTP " + response.status);
       return response.json();
