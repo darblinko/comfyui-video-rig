@@ -50,6 +50,26 @@ def mux_command(video: Path, voiceover: Path, out: Path, audio_offset: float = 0
     )  # fmt: skip
 
 
+def duration_command(video: Path) -> list[str]:
+    """Decode the first video stream to the null muxer; the final progress
+    block's out_time_us is the decoded duration. A stream copy reports the
+    last DTS instead, which is one frame short with B-frames."""
+    progress = ["-v", "error", "-nostats", "-progress", "pipe:1"]
+    return ["ffmpeg", *progress, "-i", str(video), "-map", "0:v:0", "-f", "null", "-"]
+
+
+def parse_progress_duration(stdout: str) -> float:
+    times = [line.removeprefix("out_time_us=") for line in stdout.splitlines() if line.startswith("out_time_us=")]
+    if not times or not times[-1].strip().isdigit():
+        raise RuntimeError("ffmpeg reported no duration")
+    return int(times[-1]) / 1_000_000
+
+
+def measure_duration(video: Path, run) -> float:
+    proc = run(duration_command(video), check=True, capture_output=True, text=True)
+    return parse_progress_duration(proc.stdout)
+
+
 def compare_command(left: Path, right: Path, out: Path, voiceover: Path | None) -> list[str]:
     """Scale both clips to the same height, stack them left to right and
     re-encode; add the voiceover track when there is one."""
@@ -104,12 +124,18 @@ def join_and_voice(parts: list[Path], out_dir: Path, name: str, voiceover: Path 
     return silent
 
 
-def build_model_clips(model: str, parts: list[Path], out_dir: Path, voiceover, seconds: int, run) -> Path:
+def build_model_clips(
+    model: str, parts: list[Path], out_dir: Path, voiceover, seconds: int, run, measure=measure_duration
+) -> Path:
+    """Names carry the nominal length (segments x seconds). The second clip's
+    voiceover offset is the measured length of the first clip, because a
+    segment of 81 frames at 16 fps runs 5.0625 s, not 5 s."""
     half = len(parts) // 2
     first_seconds = half * seconds
-    join_and_voice(parts[:half], out_dir, f"{model}_clip1_{first_seconds}s", voiceover, 0.0, run)
+    first = join_and_voice(parts[:half], out_dir, f"{model}_clip1_{first_seconds}s", voiceover, 0.0, run)
+    offset = measure(first, run) if voiceover is not None else 0.0
     rest_seconds = (len(parts) - half) * seconds
-    join_and_voice(parts[half:], out_dir, f"{model}_clip2_{rest_seconds}s", voiceover, float(first_seconds), run)
+    join_and_voice(parts[half:], out_dir, f"{model}_clip2_{rest_seconds}s", voiceover, offset, run)
     return join_and_voice(parts, out_dir, f"{model}_joined_{len(parts) * seconds}s", voiceover, 0.0, run)
 
 

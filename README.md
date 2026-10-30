@@ -131,6 +131,8 @@ uv run python chain/postprocess.py jobs/headphones_test/chain.toml # joins and s
 
 `chain.toml` holds the persona, the per-segment action beats, the seed base and the model list. Generated segment jobs go to `jobs/headphones_test/generated/`.
 
+A segment is not exactly 5 s: Wan 2.2 renders 81 frames at 16 fps (5.0625 s) and HunyuanVideo 1.5 renders 121 frames at 24 fps (5.0417 s). Joins are stream copies, so output names carry the nominal length (`_20s`) and `postprocess.py` decodes the first-half clip to measure its length before offsetting the voiceover on the second half.
+
 ## Cost and safety
 
 | Layer | Setting | Source |

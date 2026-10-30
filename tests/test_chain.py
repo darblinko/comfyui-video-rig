@@ -7,7 +7,14 @@ import pytest
 
 import run_chain
 from conftest import REPO_DIR
-from postprocess import build_model_clips, compare_command, concat_list, segments_by_model
+from postprocess import (
+    build_model_clips,
+    compare_command,
+    concat_list,
+    duration_command,
+    parse_progress_duration,
+    segments_by_model,
+)
 from run_chain import (
     last_frame_command,
     load_spec,
@@ -172,8 +179,16 @@ def test_concat_list_uses_absolute_paths(tmp_path):
 def test_model_clips_split_the_chain_and_offset_the_voiceover(tmp_path):
     commands = []
     parts = [tmp_path / f"s{i}.mp4" for i in range(1, 5)]
-    joined = build_model_clips("wan22", parts, tmp_path, Path("vo.mp3"), 5, lambda cmd, **_k: commands.append(cmd))
+    measured = []
+
+    def measure(video, _run):
+        measured.append(video)
+        return 10.125
+
+    record = lambda cmd, **_k: commands.append(cmd)  # noqa: E731
+    joined = build_model_clips("wan22", parts, tmp_path, Path("vo.mp3"), 5, record, measure=measure)
     assert joined == tmp_path / "wan22_joined_20s_v.mp4"
+    assert measured == [tmp_path / "wan22_clip1_10s_v.mp4"]
     outputs = [cmd[-1] for cmd in commands]
     assert outputs == [
         str(tmp_path / "wan22_clip1_10s_v.mp4"),
@@ -184,7 +199,25 @@ def test_model_clips_split_the_chain_and_offset_the_voiceover(tmp_path):
         str(tmp_path / "wan22_joined_20s.mp4"),
     ]
     clip2_mux = commands[3]
-    assert clip2_mux[clip2_mux.index("-ss") + 1] == "10.0"
+    assert clip2_mux[clip2_mux.index("-ss") + 1] == "10.125"
+
+
+def test_duration_is_read_from_the_last_progress_block():
+    stdout = "frame=40\nout_time_us=2500000\nprogress=continue\nframe=81\nout_time_us=5062500\nprogress=end\n"
+    assert parse_progress_duration(stdout) == 5.0625
+
+
+def test_missing_progress_output_is_an_error():
+    with pytest.raises(RuntimeError, match="no duration"):
+        parse_progress_duration("progress=end\n")
+
+
+def test_duration_command_decodes_the_first_video_stream():
+    cmd = duration_command(Path("seg.mp4"))
+    assert cmd[cmd.index("-progress") + 1] == "pipe:1"
+    assert cmd[cmd.index("-map") + 1] == "0:v:0"
+    assert cmd[-3:] == ["-f", "null", "-"]
+    assert "copy" not in cmd
 
 
 def test_silent_model_clips_skip_the_mux(tmp_path):
