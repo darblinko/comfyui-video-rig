@@ -14,6 +14,8 @@ import urllib.request
 import uuid
 from pathlib import Path
 
+DEFAULT_POLL_S = 5
+
 
 class ComfyError(RuntimeError):
     pass
@@ -48,6 +50,11 @@ class ComfyClient:
         with self._open(self.base + path, f"GET {path} failed") as resp:
             return json.load(resp)
 
+    def ping(self) -> None:
+        """Raise ComfyError unless the server answers; run_job calls this before
+        it creates a run folder, so a closed tunnel leaves nothing behind."""
+        self._get_json("/queue")
+
     def queue_prompt(self, workflow: dict) -> str:
         payload = json.dumps({"prompt": workflow, "client_id": self.client_id}).encode()
         req = urllib.request.Request(
@@ -69,7 +76,7 @@ class ComfyClient:
             except ComfyError as err:
                 print(f"  cancel via {path}: {err}")
 
-    def wait(self, prompt_id: str, timeout_s: int = 3600, poll_s: int = 5) -> dict:
+    def wait(self, prompt_id: str, timeout_s: int = 3600, poll_s: int = DEFAULT_POLL_S) -> dict:
         """Poll until the prompt finishes; returns its history entry.
 
         Transient poll failures (tunnel blips) are retried; on timeout the
