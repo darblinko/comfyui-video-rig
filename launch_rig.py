@@ -24,6 +24,7 @@ from botocore.exceptions import ClientError
 
 from dry_run import DryRunSession, placeholder_responses
 from rig_config import REPO_DIR, load_config
+from rig_config import aws_session as rig_aws_session
 
 STATE_FILE = REPO_DIR / ".rig_state.json"
 GPU_QUOTA_CODE = "L-DB2E81BA"  # Running On-Demand G and VT instances (vCPUs)
@@ -68,8 +69,7 @@ class Rig:
 
 
 def aws_session(cfg: dict) -> boto3.Session:
-    # profile_name is left unset so boto3 honours AWS_PROFILE or the default chain.
-    return boto3.Session(region_name=cfg["aws"]["region"])
+    return rig_aws_session(cfg["aws"]["region"])
 
 
 def resource_names(cfg: dict) -> dict:

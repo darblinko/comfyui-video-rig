@@ -1,8 +1,18 @@
 import copy
+import os
 
 import pytest
 
-from rig_config import BUCKET_PLACEHOLDER, CONFIG_FILE, apply_env_overrides, load_config
+import launch_rig
+from conftest import REPO_DIR
+from rig_config import (
+    BUCKET_PLACEHOLDER,
+    CONFIG_FILE,
+    apply_env_overrides,
+    aws_session,
+    drop_empty_aws_profile,
+    load_config,
+)
 
 
 def test_committed_config_has_no_bucket_or_profile():
@@ -33,3 +43,27 @@ def test_overrides_return_a_new_dict():
     before = copy.deepcopy(raw)
     apply_env_overrides(raw, {"RIG_OUTPUTS_BUCKET": "b", "RIG_OWNER_TAG": "o"})
     assert raw == before
+
+
+@pytest.mark.parametrize(
+    "make_session",
+    [lambda: aws_session("us-west-2"), lambda: launch_rig.aws_session({"aws": {"region": "us-west-2"}})],
+)
+def test_an_empty_aws_profile_falls_back_to_the_default_chain(make_session, monkeypatch, tmp_path):
+    monkeypatch.setenv("AWS_PROFILE", "")
+    monkeypatch.setenv("AWS_CONFIG_FILE", str(tmp_path / "missing-config"))
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(tmp_path / "missing-credentials"))
+    make_session().client("s3")
+    assert "AWS_PROFILE" not in os.environ
+
+
+def test_a_set_aws_profile_is_left_for_boto3(monkeypatch):
+    env = {"AWS_PROFILE": "work", "AWS_DEFAULT_PROFILE": ""}
+    drop_empty_aws_profile(env)
+    assert env == {"AWS_PROFILE": "work"}
+
+
+def test_env_template_leaves_every_optional_value_commented_out():
+    lines = (REPO_DIR / ".env.example").read_text().splitlines()
+    assigned = [line.split("=")[0] for line in lines if line and not line.startswith("#")]
+    assert assigned == ["RIG_OUTPUTS_BUCKET"]

@@ -2,7 +2,7 @@
 
 Account-specific values never live in the committed config:
 
-  AWS_PROFILE         read by boto3 and the AWS CLI directly; unset means the default chain
+  AWS_PROFILE         read by boto3 and the AWS CLI directly; unset or empty means the default chain
   AWS_REGION          overrides [aws] region
   RIG_OUTPUTS_BUCKET  overrides [s3] outputs_bucket; one of the two must be set
   RIG_OWNER_TAG       adds an Owner tag to every rig resource
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import os
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Mapping, MutableMapping
 from pathlib import Path
 
 REPO_DIR = Path(__file__).resolve().parent
@@ -46,3 +46,21 @@ def apply_env_overrides(cfg: dict, env: Mapping[str, str], require_bucket: bool 
         "s3": {**cfg["s3"], "outputs_bucket": bucket},
         "tags": tags,
     }
+
+
+def drop_empty_aws_profile(env: MutableMapping[str, str]) -> None:
+    """Remove empty AWS_PROFILE and AWS_DEFAULT_PROFILE. boto3 treats an empty
+    value as a profile named "" and raises ProfileNotFound; unset means the
+    default credential chain, which is what an empty value in .env intends."""
+    for name in ("AWS_PROFILE", "AWS_DEFAULT_PROFILE"):
+        if name in env and not env[name].strip():
+            del env[name]
+
+
+def aws_session(region: str):
+    """boto3 session for region; profile_name stays unset so boto3 honours
+    AWS_PROFILE or the default chain."""
+    import boto3
+
+    drop_empty_aws_profile(os.environ)
+    return boto3.Session(region_name=region)

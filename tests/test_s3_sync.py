@@ -11,7 +11,7 @@ def test_sync_uploads_every_file_and_presigns_media(tmp_path, monkeypatch):
     session = FakeSession(
         {"s3.generate_presigned_url": lambda *a, **k: f"https://example.invalid/{k['Params']['Key']}"}
     )
-    monkeypatch.setattr(s3_sync.boto3, "Session", lambda **_kwargs: session)
+    monkeypatch.setattr(s3_sync, "aws_session", lambda _region: session)
 
     urls = s3_sync.sync_run(run_dir, {"region": "us-west-2", "bucket": TEST_BUCKET})
 

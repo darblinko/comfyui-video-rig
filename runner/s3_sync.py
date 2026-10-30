@@ -14,10 +14,8 @@ import mimetypes
 import sys
 from pathlib import Path
 
-import boto3
-
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from rig_config import CONFIG_FILE, load_config
+from rig_config import CONFIG_FILE, aws_session, load_config
 
 PRESIGN_TTL_S = 7 * 24 * 3600  # SigV4 maximum
 SHAREABLE_SUFFIXES = {".mp4", ".webm", ".webp", ".png", ".jpg", ".jpeg", ".json"}
@@ -30,7 +28,7 @@ def load_aws_config(config_path: Path = CONFIG_FILE) -> dict:
 
 def sync_run(run_dir: Path, aws: dict, prefix: str = "runs") -> dict[str, str]:
     """Upload every file under run_dir; returns {relative_path: presigned_url}."""
-    session = boto3.Session(region_name=aws["region"])  # AWS_PROFILE or the default chain
+    session = aws_session(aws["region"])
     s3 = session.client("s3")
     urls: dict[str, str] = {}
     for path in sorted(run_dir.rglob("*")):
