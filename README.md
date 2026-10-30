@@ -124,10 +124,17 @@ Other commands: `status`, `start`, `terminate` (deletes the instance and its vol
 
 ### Chained clips
 
+A chain starts from a still that is not in the repository. Generate one, pick it, and copy it to the spec's `start_frame` path first:
+
 ```bash
+uv run python runner/run_job.py jobs/headphones_test/frame_headphones.toml   # prints the run folder, outputs/<run_id>
+mkdir -p outputs/headphones_test
+cp outputs/<run_id>/flux_persona_ref/<chosen>.png outputs/headphones_test/frame0.png
 uv run python chain/run_chain.py jobs/headphones_test/chain.toml   # all models, all segments
 uv run python chain/postprocess.py jobs/headphones_test/chain.toml # joins and side-by-side
 ```
+
+`run_chain.py --model wan22 --start-seg 3` resumes one model from segment 3; it drops that model's records for segment 3 and later from `outputs/headphones_test/chain_state.json` first. `postprocess.py` exits unless every model in the state has all segments and each segment was generated after, and from the last frame of, the one before it.
 
 `chain.toml` holds the persona, the per-segment action beats, the seed base and the model list. Generated segment jobs go to `jobs/headphones_test/generated/`.
 

@@ -3,6 +3,7 @@
 # frame of segment n-1. Every model gets the same seed for the same segment.
 #
 #   python3 runner/run_job.py jobs/headphones_test/frame_headphones.toml
+#   mkdir -p outputs/headphones_test
 #   cp outputs/<run_id>/flux_persona_ref/<chosen>.png outputs/headphones_test/frame0.png
 #   python3 chain/run_chain.py jobs/headphones_test/chain.toml
 #   python3 chain/postprocess.py jobs/headphones_test/chain.toml

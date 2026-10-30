@@ -164,7 +164,8 @@ def run_model_chain(spec: dict, model: str, start_seg: int) -> None:
     for seg in range(start_seg, len(spec["beats"]) + 1):
         start_rel = segment_start_image(spec, model, seg)
         if not (REPO_DIR / start_rel).exists():
-            raise RuntimeError(f"missing start image {start_rel}")
+            hint = " (generate a still and copy it there; see the spec's header)" if seg == 1 else ""
+            raise RuntimeError(f"missing start image {start_rel}{hint}")
         save_state(state_file, drop_from(load_state(state_file), model, seg))
         raw = run_segment(spec, model, seg)
         last_png = stage / f"{model}_seg{seg}_last.png"
