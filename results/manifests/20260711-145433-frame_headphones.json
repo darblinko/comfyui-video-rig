@@ -1,0 +1,31 @@
+{
+  "run_id": "20260711-145433-frame_headphones",
+  "created_at": "2026-07-11T21:54:59.219742+00:00",
+  "job_file": "jobs/headphones_test/frame_headphones.toml",
+  "job": {
+    "negative_prompt": "anime, cartoon, illustration, drawing, painting, cgi, 3d render, doll, smooth plastic skin, deformed hands, extra fingers, watermark, text",
+    "seed": 555001,
+    "duration_seconds": 5,
+    "resolution": [
+      720,
+      1280
+    ],
+    "job_type": "start_frame",
+    "persona_id": "presenter_desk_v1",
+    "workflow": "workflows/flux_persona_ref.json",
+    "prompt": "RAW photo, candid photograph of a cute geeky young woman in her early 20s, real human, natural skin texture with visible pores, round glasses, dark messy bun with a pink dyed streak, oversized lavender hoodie, wearing fluffy pink cat-ear gaming headphones where the plush cat ears are attached to the headphone headband, glowing LED ring on the ear cup, both hands raised touching the headphones as if about to lift them off, cozy bedroom desk setup behind her with anime figurines and soft RGB glow, warm lighting, looking at the camera mid-sentence, shot on a full-frame camera, 85mm f1.8, shallow depth of field, photojournalism style"
+  },
+  "results": [
+    {
+      "label": "flux_persona_ref",
+      "prompt_id": "ac1bc39e-11ef-43e5-accd-4389d7b17df2",
+      "elapsed_s": 26.2,
+      "files": [
+        "flux_persona_ref/persona_ref_00004_.png"
+      ],
+      "final": null
+    }
+  ],
+  "errors": [],
+  "compare": null
+}

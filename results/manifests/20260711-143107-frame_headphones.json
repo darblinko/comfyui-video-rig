@@ -1,0 +1,26 @@
+{
+  "run_id": "20260711-143107-frame_headphones",
+  "created_at": "2026-07-11T21:32:05.464324+00:00",
+  "job_file": "jobs/headphones_test/frame_headphones.toml",
+  "job": {
+    "negative_prompt": "anime drawing, cartoon, illustration, deformed hands, extra fingers, watermark, text",
+    "seed": 555000,
+    "duration_seconds": 5,
+    "resolution": [
+      720,
+      1280
+    ],
+    "job_type": "start_frame",
+    "persona_id": "presenter_desk_v1",
+    "workflow": "workflows/flux_persona_ref.json",
+    "prompt": "photorealistic portrait of a cute anime-enthusiast nerd girl in her early 20s, round glasses, dark messy bun with a pink dyed streak, oversized lavender graphic hoodie, wearing fluffy pink cat-ear gaming headphones with a glowing LED ring on the ear cup, both hands raised touching the headphones as if about to lift them off, cozy bedroom desk setup behind her with anime figurines and soft RGB glow, warm lighting, looking at the camera mid-sentence, 85mm lens, shallow depth of field"
+  },
+  "results": [],
+  "errors": [
+    {
+      "label": "flux_persona_ref",
+      "error": "ComfyUI rejected the workflow: cannot reach ComfyUI at http://127.0.0.1:8188 - is the tunnel open? (timed out)"
+    }
+  ],
+  "compare": null
+}

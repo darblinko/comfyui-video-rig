@@ -1,0 +1,104 @@
+{
+  "meta": {
+    "repo": "comfyui-video-rig",
+    "measured": "2026-07-11",
+    "source": "results/manifests/*.json"
+  },
+  "charts": [
+    {
+      "name": "summary",
+      "type": "stats",
+      "title": "Recorded runs on 2026-07-11",
+      "subtitle": "17 model runs in 16 manifests",
+      "source": "results/manifests/*.json",
+      "alt": "Runs recorded: 16; Video clips generated: 11; Wan 2.2 A14B, median per clip: 1,422 s; HunyuanVideo 1.5, median per clip: 1,452 s",
+      "tiles": [
+        {
+          "label": "Runs recorded",
+          "value": "16",
+          "note": "2 failed: ComfyUI not reachable"
+        },
+        {
+          "label": "Video clips generated",
+          "value": "11",
+          "note": "5 s, 720x1280"
+        },
+        {
+          "label": "Wan 2.2 A14B, median per clip",
+          "value": "1,422 s",
+          "note": "6 clips"
+        },
+        {
+          "label": "HunyuanVideo 1.5, median per clip",
+          "value": "1,452 s",
+          "note": "5 clips"
+        }
+      ]
+    },
+    {
+      "name": "video-clip-time",
+      "type": "columns",
+      "title": "Seconds to generate one 5 s, 720x1280 clip",
+      "subtitle": "Same prompt and seed for both models per category; timed from queueing to the last download",
+      "source": "results/manifests/*.json",
+      "alt": "Each clip took between 1,378.9 and 1,587.9 seconds. Wan 2.2 A14B: 1490.4, 1444.2, 1412.1, 1408.8, 1409.3; HunyuanVideo 1.5: 1587.9, 1572.9, 1451.7, 1397.4, 1378.9",
+      "format": "number",
+      "categories": [
+        "shaker bake-off",
+        "chain segment 1",
+        "chain segment 2",
+        "chain segment 3",
+        "chain segment 4"
+      ],
+      "series": [
+        {
+          "name": "Wan 2.2 A14B",
+          "values": [
+            1490.4,
+            1444.2,
+            1412.1,
+            1408.8,
+            1409.3
+          ]
+        },
+        {
+          "name": "HunyuanVideo 1.5",
+          "values": [
+            1587.9,
+            1572.9,
+            1451.7,
+            1397.4,
+            1378.9
+          ]
+        }
+      ]
+    },
+    {
+      "name": "still-time",
+      "type": "hbar",
+      "title": "Seconds to generate one FLUX.1-dev still",
+      "subtitle": "Runs in time order; label is the job name and the start time (HHMM)",
+      "source": "results/manifests/*.json",
+      "alt": "persona_ref 1034: 194.0 s; frame_shaker 1038: 16.7 s; frame_headphones 1449: 155.1 s; frame_headphones 1454: 26.2 s",
+      "format": "number",
+      "data": [
+        {
+          "label": "persona_ref 1034",
+          "value": 194.0
+        },
+        {
+          "label": "frame_shaker 1038",
+          "value": 16.7
+        },
+        {
+          "label": "frame_headphones 1449",
+          "value": 155.1
+        },
+        {
+          "label": "frame_headphones 1454",
+          "value": 26.2
+        }
+      ]
+    }
+  ]
+}

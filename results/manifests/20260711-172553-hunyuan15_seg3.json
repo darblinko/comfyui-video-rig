@@ -1,0 +1,34 @@
+{
+  "run_id": "20260711-172553-hunyuan15_seg3",
+  "created_at": "2026-07-12T00:49:23.787905+00:00",
+  "job_file": "jobs/headphones_test/generated/hunyuan15_seg3.toml",
+  "job": {
+    "negative_prompt": "camera pan, camera zoom, camera movement, dolly, scene cut, deformed hands, extra fingers, fused fingers, warped face, plastic skin, flickering, morphing, watermark, text, anime, cartoon",
+    "seed": 555103,
+    "duration_seconds": 5,
+    "resolution": [
+      720,
+      1280
+    ],
+    "job_type": "product_demo_video",
+    "persona_id": "presenter_desk_v1",
+    "models": [
+      "hunyuan15"
+    ],
+    "start_image": "outputs/headphones_test/hunyuan15_seg2_last.png",
+    "prompt": "photorealistic video of a cute geeky young woman in her early twenties, round glasses, dark messy bun, oversized lavender hoodie, fluffy pink cat-ear gaming headphones with glowing pink LED rings, she slowly moves the headphone ear cup closer to the camera until the ear cup with its glowing LED ring fills most of the frame, keeping her index finger next to the USB-C charging port, still speaking to the camera, fixed static camera, no camera movement, cozy bedroom with soft RGB glow, warm lighting, realistic hand-object interaction"
+  },
+  "results": [
+    {
+      "label": "hunyuan15",
+      "prompt_id": "70c96f1d-419e-47d8-a3a0-17737ab5de36",
+      "elapsed_s": 1397.4,
+      "files": [
+        "hunyuan15/hunyuan15_00004_.mp4"
+      ],
+      "final": "final_hunyuan15.mp4"
+    }
+  ],
+  "errors": [],
+  "compare": null
+}

@@ -1,0 +1,34 @@
+{
+  "run_id": "20260711-145915-wan22_seg1",
+  "created_at": "2026-07-11T22:23:56.904089+00:00",
+  "job_file": "jobs/headphones_test/generated/wan22_seg1.toml",
+  "job": {
+    "negative_prompt": "camera pan, camera zoom, camera movement, dolly, scene cut, deformed hands, extra fingers, fused fingers, warped face, plastic skin, flickering, morphing, watermark, text, anime, cartoon",
+    "seed": 555101,
+    "duration_seconds": 5,
+    "resolution": [
+      720,
+      1280
+    ],
+    "job_type": "product_demo_video",
+    "persona_id": "presenter_desk_v1",
+    "models": [
+      "wan22"
+    ],
+    "start_image": "outputs/headphones_test/frame0.png",
+    "prompt": "photorealistic video of a cute geeky young woman in her early twenties, round glasses, dark messy bun, oversized lavender hoodie, fluffy pink cat-ear gaming headphones with glowing pink LED rings, wearing the headphones with both hands on the ear cups, she gently lifts the headphones off her head and lowers them to hold in front of her chest, speaking to the camera with natural mouth movement the whole time, fixed static camera, no camera movement, cozy bedroom with soft RGB glow, warm lighting, realistic hand-object interaction"
+  },
+  "results": [
+    {
+      "label": "wan22",
+      "prompt_id": "4c8c285c-4559-4ec0-9281-865a47e529ec",
+      "elapsed_s": 1444.2,
+      "files": [
+        "wan22/wan22_00003_.mp4"
+      ],
+      "final": "final_wan22.mp4"
+    }
+  ],
+  "errors": [],
+  "compare": null
+}

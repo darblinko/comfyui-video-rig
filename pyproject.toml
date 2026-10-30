@@ -32,9 +32,9 @@ select = ["E", "W", "F", "I", "N", "UP", "B", "SIM", "RUF"]
 # list them as first-party for a stable import order.
 known-first-party = [
     "comfy_client", "conftest", "dry_run", "launch_rig", "media", "postprocess", "rig_config", "run_chain",
-    "run_job", "s3_sync",
+    "run_job", "s3_sync", "summarize",
 ]
 
 [tool.pytest.ini_options]
-pythonpath = [".", "runner", "chain"]
+pythonpath = [".", "runner", "chain", "results"]
 testpaths = ["tests"]
