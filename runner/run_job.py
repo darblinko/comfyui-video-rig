@@ -25,12 +25,12 @@ import subprocess
 import sys
 import time
 import tomllib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from comfy_client import ComfyClient, ComfyError  # noqa: E402
-from s3_sync import load_aws_config, sync_run  # noqa: E402
+from comfy_client import ComfyClient, ComfyError
+from s3_sync import load_aws_config, sync_run
 
 PROTO_DIR = Path(__file__).resolve().parent.parent
 VIDEO_SUFFIXES = {".mp4", ".webm", ".webp", ".gif"}
@@ -152,14 +152,23 @@ def encode_ig_mp4(source: Path, dest: Path, resolution: list[int]) -> Path | Non
         print("WARNING: ffmpeg not found locally - skipping IG encode")
         return None
     width, height = resolution
-    scale = (
-        f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
-        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2"
-    )
+    scale = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2"
     cmd = [
-        "ffmpeg", "-y", "-i", str(source), "-vf", scale,
-        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18",
-        "-movflags", "+faststart", str(dest),
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(source),
+        "-vf",
+        scale,
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-crf",
+        "18",
+        "-movflags",
+        "+faststart",
+        str(dest),
     ]
     return run_ffmpeg(cmd, dest)
 
@@ -184,33 +193,34 @@ def build_side_by_side(finals: list[Path], dest: Path) -> Path | None:
         inputs += ["-i", str(path)]
     filter_expr = "[0:v]scale=-2:720[l];[1:v]scale=-2:720[r];[l][r]hstack"
     cmd = [
-        "ffmpeg", "-y", *inputs, "-filter_complex", filter_expr,
-        "-c:v", "libx264", "-pix_fmt", "yuv420p", str(dest),
+        "ffmpeg",
+        "-y",
+        *inputs,
+        "-filter_complex",
+        filter_expr,
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        str(dest),
     ]
     return run_ffmpeg(cmd, dest)
 
 
-def execute_run(
-    client: ComfyClient, run: dict, job: dict, uploads: dict, out_dir: Path, timeout_s: int
-) -> dict:
+def execute_run(client: ComfyClient, run: dict, job: dict, uploads: dict, out_dir: Path, timeout_s: int) -> dict:
     print(f"\n=== {run['label']}: queueing")
     workflow = render_workflow(run, job, uploads)
     started = time.monotonic()
     prompt_id = client.queue_prompt(workflow)
     entry = client.wait(prompt_id, timeout_s=timeout_s)
-    files = [
-        client.download_output(info, out_dir / run["label"])
-        for info in client.output_files(entry)
-    ]
+    files = [client.download_output(info, out_dir / run["label"]) for info in client.output_files(entry)]
     elapsed = round(time.monotonic() - started, 1)
     print(f"=== {run['label']}: {len(files)} file(s) in {elapsed}s")
 
     final = None
     videos = [f for f in files if f.suffix.lower() in VIDEO_SUFFIXES]
     if videos:
-        final = encode_ig_mp4(
-            videos[0], out_dir / f"final_{run['label']}.mp4", job["resolution"]
-        )
+        final = encode_ig_mp4(videos[0], out_dir / f"final_{run['label']}.mp4", job["resolution"])
     return {
         "label": run["label"],
         "prompt_id": prompt_id,
@@ -226,7 +236,9 @@ def main() -> None:
     parser.add_argument("--models", nargs="*", help="subset of the job's models to run")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument(
-        "--port", type=int, default=None,
+        "--port",
+        type=int,
+        default=None,
         help="ComfyUI port (default: comfyui_port from rig.config.toml)",
     )
     parser.add_argument("--timeout", type=int, default=3600, help="per-run seconds")
@@ -258,7 +270,7 @@ def main() -> None:
 
     manifest = {
         "run_id": run_id,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "job_file": str(args.job_file),
         "job": job,
         "results": results,

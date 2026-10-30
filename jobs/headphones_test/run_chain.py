@@ -86,8 +86,12 @@ def run_segment(model: str, seg: int, start_image: Path) -> Path:
     print(f"=== chain: {model} seg {seg}/4 (start={start_image.name})", flush=True)
 
     cmd = [
-        sys.executable, "runner/run_job.py", str(toml_path),
-        "--no-sync", "--timeout", str(SEGMENT_TIMEOUT),
+        sys.executable,
+        "runner/run_job.py",
+        str(toml_path),
+        "--no-sync",
+        "--timeout",
+        str(SEGMENT_TIMEOUT),
     ]
     proc = subprocess.run(cmd, cwd=PROTO, capture_output=True, text=True)
     print(proc.stdout, flush=True)
@@ -110,8 +114,7 @@ def run_segment(model: str, seg: int, start_image: Path) -> Path:
 
 def extract_last_frame(video: Path, out_png: Path) -> None:
     subprocess.run(
-        ["ffmpeg", "-y", "-loglevel", "error", "-sseof", "-0.5",
-         "-i", str(video), "-update", "1", str(out_png)],
+        ["ffmpeg", "-y", "-loglevel", "error", "-sseof", "-0.5", "-i", str(video), "-update", "1", str(out_png)],
         check=True,
     )
     if not out_png.exists():
@@ -122,23 +125,19 @@ def append_state(record: dict) -> None:
     state = []
     if STATE_FILE.exists():
         state = json.loads(STATE_FILE.read_text())
-    STATE_FILE.write_text(json.dumps(state + [record], indent=2))
+    STATE_FILE.write_text(json.dumps([*state, record], indent=2))
 
 
 def run_model_chain(model: str, start_seg: int) -> None:
     for seg in range(start_seg, 5):
-        if seg == 1:
-            start_image = STAGE / "frame0.png"
-        else:
-            start_image = STAGE / f"{model}_seg{seg - 1}_last.png"
+        start_image = STAGE / "frame0.png" if seg == 1 else STAGE / f"{model}_seg{seg - 1}_last.png"
         if not start_image.exists():
             raise RuntimeError(f"missing start image {start_image}")
 
         raw = run_segment(model, seg, start_image)
         last_png = STAGE / f"{model}_seg{seg}_last.png"
         extract_last_frame(raw, last_png)
-        append_state({"model": model, "segment": seg, "raw": str(raw),
-                      "last_frame": str(last_png)})
+        append_state({"model": model, "segment": seg, "raw": str(raw), "last_frame": str(last_png)})
         print(f"=== chain: {model} seg {seg}/4 done -> {raw}", flush=True)
 
 

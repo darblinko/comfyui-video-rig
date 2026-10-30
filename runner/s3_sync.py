@@ -45,9 +45,7 @@ def sync_run(run_dir: Path, aws: dict, prefix: str = "runs") -> dict[str, str]:
         rel = path.relative_to(run_dir)
         key = f"{prefix}/{run_dir.name}/{rel}"
         content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-        s3.upload_file(
-            str(path), aws["bucket"], key, ExtraArgs={"ContentType": content_type}
-        )
+        s3.upload_file(str(path), aws["bucket"], key, ExtraArgs={"ContentType": content_type})
         if path.suffix.lower() in SHAREABLE_SUFFIXES:
             urls[str(rel)] = s3.generate_presigned_url(
                 "get_object",

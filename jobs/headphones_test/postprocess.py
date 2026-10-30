@@ -28,14 +28,30 @@ def ffmpeg(*args: str) -> None:
 def concat_copy(parts: list[Path], out: Path) -> None:
     list_file = out.with_suffix(".txt")
     list_file.write_text("".join(f"file '{p}'\n" for p in parts))
-    ffmpeg("-f", "concat", "-safe", "0", "-i", str(list_file),
-           "-c", "copy", str(out))
+    ffmpeg("-f", "concat", "-safe", "0", "-i", str(list_file), "-c", "copy", str(out))
 
 
 def mux_voice(video: Path, out: Path, audio_offset: float = 0.0) -> None:
-    ffmpeg("-i", str(video), "-ss", str(audio_offset), "-i", str(VOICEOVER),
-           "-map", "0:v", "-map", "1:a", "-c:v", "copy",
-           "-c:a", "aac", "-b:a", "128k", "-shortest", str(out))
+    ffmpeg(
+        "-i",
+        str(video),
+        "-ss",
+        str(audio_offset),
+        "-i",
+        str(VOICEOVER),
+        "-map",
+        "0:v",
+        "-map",
+        "1:a",
+        "-c:v",
+        "copy",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        "-shortest",
+        str(out),
+    )
 
 
 def main() -> None:
@@ -58,14 +74,34 @@ def main() -> None:
         joined[model] = joined_v
         print(f"{model}: clips built", flush=True)
 
-    ffmpeg("-i", str(joined["wan22"]), "-i", str(joined["hunyuan15"]),
-           "-i", str(VOICEOVER),
-           "-filter_complex",
-           "[0:v]scale=-2:720[l];[1:v]scale=-2:720[r];[l][r]hstack[v]",
-           "-map", "[v]", "-map", "2:a",
-           "-c:v", "libx264", "-crf", "19", "-pix_fmt", "yuv420p",
-           "-movflags", "+faststart", "-c:a", "aac", "-b:a", "128k",
-           "-shortest", str(HP / "compare_side_by_side_20s.mp4"))
+    ffmpeg(
+        "-i",
+        str(joined["wan22"]),
+        "-i",
+        str(joined["hunyuan15"]),
+        "-i",
+        str(VOICEOVER),
+        "-filter_complex",
+        "[0:v]scale=-2:720[l];[1:v]scale=-2:720[r];[l][r]hstack[v]",
+        "-map",
+        "[v]",
+        "-map",
+        "2:a",
+        "-c:v",
+        "libx264",
+        "-crf",
+        "19",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        "-shortest",
+        str(HP / "compare_side_by_side_20s.mp4"),
+    )
     print("side-by-side built", flush=True)
 
 

@@ -34,9 +34,7 @@ class ComfyClient:
             detail = err.read().decode(errors="replace")
             raise ComfyError(f"{context} ({err.code}): {detail[:2000]}") from err
         except (urllib.error.URLError, OSError) as err:
-            raise ComfyError(
-                f"{context}: cannot reach ComfyUI at {self.base} - is the tunnel open? ({err})"
-            ) from err
+            raise ComfyError(f"{context}: cannot reach ComfyUI at {self.base} - is the tunnel open? ({err})") from err
 
     def _post_json(self, path: str, payload: dict, context: str) -> None:
         req = urllib.request.Request(
@@ -51,9 +49,7 @@ class ComfyClient:
             return json.load(resp)
 
     def queue_prompt(self, workflow: dict) -> str:
-        payload = json.dumps(
-            {"prompt": workflow, "client_id": self.client_id}
-        ).encode()
+        payload = json.dumps({"prompt": workflow, "client_id": self.client_id}).encode()
         req = urllib.request.Request(
             self.base + "/prompt",
             data=payload,
@@ -108,19 +104,14 @@ class ComfyClient:
                 last_note = time.monotonic()
             time.sleep(poll_s)
         self.cancel(prompt_id)
-        raise ComfyError(
-            f"timed out after {timeout_s}s waiting for prompt {prompt_id} (cancellation sent)"
-        )
+        raise ComfyError(f"timed out after {timeout_s}s waiting for prompt {prompt_id} (cancellation sent)")
 
     def upload_image(self, path: Path) -> str:
         """Upload an input image; returns the server-side filename to reference."""
         boundary = uuid.uuid4().hex
         parts = [
             f"--{boundary}\r\n".encode(),
-            (
-                f'Content-Disposition: form-data; name="image"; '
-                f'filename="{path.name}"\r\n'
-            ).encode(),
+            (f'Content-Disposition: form-data; name="image"; filename="{path.name}"\r\n').encode(),
             b"Content-Type: application/octet-stream\r\n\r\n",
             path.read_bytes(),
             f"\r\n--{boundary}\r\n".encode(),
@@ -146,9 +137,10 @@ class ComfyClient:
         )
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest = dest_dir / Path(file_info["filename"]).name
-        with self._open(
-            f"{self.base}/view?{query}", f"download of {file_info['filename']} failed"
-        ) as resp, open(dest, "wb") as out:
+        with (
+            self._open(f"{self.base}/view?{query}", f"download of {file_info['filename']} failed") as resp,
+            open(dest, "wb") as out,
+        ):
             while chunk := resp.read(1 << 20):
                 out.write(chunk)
         return dest

@@ -192,9 +192,7 @@ def ensure_role(session: boto3.Session, cfg: dict) -> str:
         print(f"instance profile exists: {names['profile']}")
     attached = iam.get_instance_profile(InstanceProfileName=names["profile"])
     if not attached["InstanceProfile"]["Roles"]:
-        iam.add_role_to_instance_profile(
-            InstanceProfileName=names["profile"], RoleName=names["role"]
-        )
+        iam.add_role_to_instance_profile(InstanceProfileName=names["profile"], RoleName=names["role"])
     return names["profile"]
 
 
@@ -206,13 +204,10 @@ def resolve_vpc_and_subnet(ec2, cfg: dict) -> tuple[str, str]:
     vpcs = ec2.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"]
     if not vpcs:
         raise SystemExit(
-            "No default VPC in this region. Set rig.subnet_id in rig.config.toml "
-            "to a public subnet of another VPC."
+            "No default VPC in this region. Set rig.subnet_id in rig.config.toml to a public subnet of another VPC."
         )
     vpc_id = vpcs[0]["VpcId"]
-    subnets = ec2.describe_subnets(
-        Filters=[{"Name": "vpc-id", "Values": [vpc_id]}]
-    )["Subnets"]
+    subnets = ec2.describe_subnets(Filters=[{"Name": "vpc-id", "Values": [vpc_id]}])["Subnets"]
     return vpc_id, sorted(subnets, key=lambda s: s["AvailabilityZone"])[0]["SubnetId"]
 
 
@@ -233,9 +228,7 @@ def ensure_security_group(session: boto3.Session, cfg: dict) -> str:
         GroupName=names["sg"],
         Description="ComfyUI video rig - no inbound, SSM access only",
         VpcId=vpc_id,
-        TagSpecifications=[
-            {"ResourceType": "security-group", "Tags": tag_list(cfg, names["sg"])}
-        ],
+        TagSpecifications=[{"ResourceType": "security-group", "Tags": tag_list(cfg, names["sg"])}],
     )
     print(f"created security group (no inbound rules): {sg['GroupId']}")
     return sg["GroupId"]
@@ -263,9 +256,7 @@ def resolve_ami(session: boto3.Session, cfg: dict) -> str:
 def check_gpu_quota(session: boto3.Session, cfg: dict) -> None:
     try:
         ec2 = session.client("ec2")
-        itype = ec2.describe_instance_types(
-            InstanceTypes=[cfg["rig"]["instance_type"]]
-        )["InstanceTypes"][0]
+        itype = ec2.describe_instance_types(InstanceTypes=[cfg["rig"]["instance_type"]])["InstanceTypes"][0]
         needed = itype["VCpuInfo"]["DefaultVCpus"]
         quotas = session.client("service-quotas")
         quota = quotas.get_service_quota(ServiceCode="ec2", QuotaCode=GPU_QUOTA_CODE)
@@ -295,9 +286,7 @@ def store_hf_token(session: boto3.Session) -> None:
     ssm = session.client("ssm")
     token = os.environ.get("HF_TOKEN", "")
     if token:
-        ssm.put_parameter(
-            Name=HF_TOKEN_PARAM, Value=token, Type="SecureString", Overwrite=True
-        )
+        ssm.put_parameter(Name=HF_TOKEN_PARAM, Value=token, Type="SecureString", Overwrite=True)
         print(f"HF token stored in SSM parameter {HF_TOKEN_PARAM}")
         return
     try:
@@ -389,9 +378,7 @@ def run_instance(session: boto3.Session, cfg: dict, ami_id: str, sg_id: str) -> 
 def cmd_launch(cfg: dict) -> None:
     existing = find_rig_instance(cfg)
     if existing:
-        raise SystemExit(
-            f"instance {existing['InstanceId']} already exists - use status/start/terminate"
-        )
+        raise SystemExit(f"instance {existing['InstanceId']} already exists - use status/start/terminate")
     session = aws_session(cfg)
     check_gpu_quota(session, cfg)
     ensure_bucket(session, cfg)
@@ -403,14 +390,12 @@ def cmd_launch(cfg: dict) -> None:
     print(f"launching {cfg['rig']['instance_type']} from {ami_id} ...")
     instance_id = run_instance(session, cfg, ami_id, sg_id)
     write_state({"instance_id": instance_id, "sg_id": sg_id, "ami_id": ami_id})
-    session.client("ec2").get_waiter("instance_running").wait(
-        InstanceIds=[instance_id]
-    )
+    session.client("ec2").get_waiter("instance_running").wait(InstanceIds=[instance_id])
     print(f"instance running: {instance_id}")
     print("bootstrap (models download) takes 30-60 min. Follow along with:")
     print("  python3 launch_rig.py session   # then: tail -f /var/log/rig-bootstrap.log")
     print("then open the UI with:")
-    print("  python3 launch_rig.py tunnel    # http://localhost:%s" % cfg["rig"]["comfyui_port"])
+    print(f"  python3 launch_rig.py tunnel    # http://localhost:{cfg['rig']['comfyui_port']}")
 
 
 # --- lifecycle -----------------------------------------------------------
@@ -445,10 +430,7 @@ def find_rig_instance(cfg: dict) -> dict | None:
         if info and instance_tags(info).get("Name") == name:
             return info
         if info:
-            print(
-                f"WARNING: ignoring {state['instance_id']} from .rig_state.json - "
-                f"its Name tag is not '{name}'"
-            )
+            print(f"WARNING: ignoring {state['instance_id']} from .rig_state.json - its Name tag is not '{name}'")
     filters = [
         {"Name": "tag:Name", "Values": [name]},
         {
@@ -463,8 +445,7 @@ def find_rig_instance(cfg: dict) -> dict | None:
     if len(matches) > 1:
         ids = ", ".join(m["InstanceId"] for m in matches)
         raise SystemExit(
-            f"multiple instances match the rig tags ({ids}) - "
-            "put the right instance_id in .rig_state.json"
+            f"multiple instances match the rig tags ({ids}) - put the right instance_id in .rig_state.json"
         )
     if matches:
         write_state({**state, "instance_id": matches[0]["InstanceId"]})
@@ -505,8 +486,7 @@ def cmd_start(cfg: dict) -> None:
 def cmd_terminate(cfg: dict) -> None:
     info = require_instance(cfg)
     answer = input(
-        f"Terminate {info['InstanceId']} and DELETE its EBS volume (all models)? "
-        "Type 'terminate' to confirm: "
+        f"Terminate {info['InstanceId']} and DELETE its EBS volume (all models)? Type 'terminate' to confirm: "
     )
     if answer.strip() != "terminate":
         raise SystemExit("aborted")
@@ -524,11 +504,17 @@ def cmd_tunnel(cfg: dict) -> None:
     os.execvp(
         "aws",
         [
-            "aws", "ssm", "start-session",
-            "--target", info["InstanceId"],
-            "--document-name", "AWS-StartPortForwardingSession",
-            "--parameters", f"portNumber={port},localPortNumber={port}",
-            "--region", cfg["aws"]["region"],
+            "aws",
+            "ssm",
+            "start-session",
+            "--target",
+            info["InstanceId"],
+            "--document-name",
+            "AWS-StartPortForwardingSession",
+            "--parameters",
+            f"portNumber={port},localPortNumber={port}",
+            "--region",
+            cfg["aws"]["region"],
         ],
     )
 
@@ -538,9 +524,13 @@ def cmd_session(cfg: dict) -> None:
     os.execvp(
         "aws",
         [
-            "aws", "ssm", "start-session",
-            "--target", info["InstanceId"],
-            "--region", cfg["aws"]["region"],
+            "aws",
+            "ssm",
+            "start-session",
+            "--target",
+            info["InstanceId"],
+            "--region",
+            cfg["aws"]["region"],
         ],
     )
 
@@ -567,9 +557,7 @@ def find_rig_security_groups(ec2, cfg: dict) -> set[str]:
     sg_ids = set()
     if read_state().get("sg_id"):
         sg_ids.add(read_state()["sg_id"])
-    resp = ec2.describe_security_groups(
-        Filters=[{"Name": "group-name", "Values": [resource_names(cfg)["sg"]]}]
-    )
+    resp = ec2.describe_security_groups(Filters=[{"Name": "group-name", "Values": [resource_names(cfg)["sg"]]}])
     sg_ids.update(g["GroupId"] for g in resp["SecurityGroups"])
     return sg_ids
 

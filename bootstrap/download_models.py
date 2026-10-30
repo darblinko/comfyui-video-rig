@@ -24,9 +24,7 @@ def download_file(entry: dict, dest_root: Path, staging: Path) -> bool:
         print(f"exists, skipping: {dest_path}")
         return True
     print(f"downloading {entry['repo']} :: {entry['path']}")
-    downloaded = hf_hub_download(
-        repo_id=entry["repo"], filename=entry["path"], local_dir=staging
-    )
+    downloaded = hf_hub_download(repo_id=entry["repo"], filename=entry["path"], local_dir=staging)
     dest_dir.mkdir(parents=True, exist_ok=True)
     shutil.move(downloaded, dest_path)
     print(f"  -> {dest_path}")
@@ -56,7 +54,8 @@ def main() -> None:
             try:
                 download_file(entry, args.dest, staging)
                 ok += 1
-            except Exception as err:  # noqa: BLE001 - log and continue per file
+            except Exception as err:
+                # One bad manifest entry must not stop the remaining downloads.
                 failed.append(f"{entry['repo']}::{entry['path']}")
                 print(f"FAILED {entry['repo']} :: {entry['path']}: {err}")
 
