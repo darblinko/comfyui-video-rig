@@ -339,6 +339,17 @@ exec > /var/log/rig-userdata.log 2>&1
 # persists) instead of billing forever. bootstrap.sh cancels this once the
 # watchdog runs.
 shutdown -h +180
+# User data runs on the first boot only. This per-boot script re-arms the same
+# shutdown on every later boot until the watchdog timer is enabled, so a box
+# whose first bootstrap failed early is still stopped after a `start`.
+mkdir -p /var/lib/cloud/scripts/per-boot
+cat > /var/lib/cloud/scripts/per-boot/rig-fail-safe.sh <<'FAILSAFE'
+#!/bin/bash
+if ! systemctl is-enabled --quiet rig-idle-watchdog.timer 2>/dev/null; then
+  shutdown -h +180
+fi
+FAILSAFE
+chmod 0755 /var/lib/cloud/scripts/per-boot/rig-fail-safe.sh
 cat > /etc/rig.env <<EOF
 RIG_OUTPUTS_BUCKET={bucket}
 RIG_REGION={region}
@@ -513,6 +524,7 @@ def cmd_start(rig: Rig) -> None:
     ec2.start_instances(InstanceIds=[info["InstanceId"]])
     ec2.get_waiter("instance_running").wait(InstanceIds=[info["InstanceId"]])
     print(f"started {info['InstanceId']}")
+    print("if bootstrap never enabled the idle watchdog, the per-boot fail-safe stops the instance in 180 min")
 
 
 def confirm_terminate(rig: Rig, instance_id: str) -> bool:

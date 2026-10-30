@@ -65,6 +65,13 @@ def test_instance_policy_is_read_only_and_scoped(cfg):
     assert resources[2].endswith(":parameter/comfyui-video-rig/hf-token")
 
 
+def test_user_data_installs_a_per_boot_fail_safe_before_any_download(cfg):
+    user_data = build_user_data(cfg)
+    per_boot = user_data.index("/var/lib/cloud/scripts/per-boot/rig-fail-safe.sh")
+    assert per_boot < user_data.index("aws s3 cp")
+    assert "systemctl is-enabled --quiet rig-idle-watchdog.timer" in user_data
+
+
 def test_user_data_sets_the_fail_safe_and_watchdog_settings(cfg):
     user_data = build_user_data(cfg)
     assert "shutdown -h +180" in user_data
