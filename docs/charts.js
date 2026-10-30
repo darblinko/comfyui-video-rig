@@ -1,6 +1,15 @@
 // Renders every <figure class="chart" data-chart="name"> from the page's chart data.
 // Data comes from <script type="application/json" id="chart-data"> when present,
-// otherwise from data.json next to the page. Schema: publish-kit README.md.
+// otherwise from data.json next to the page. Data layout: {"charts": [chart, ...]}.
+// Every chart has name, type, title and source; subtitle, alt and format are optional.
+// format: percent (fractions, 0.86 prints 86%), number (default), decimal2, decimal3.
+// hbar: data [{label, value, status?, note?}], optional max, threshold {value, label};
+//   status "pass" or "fail" colors the bar.
+// columns: categories [...], series [{name, values}], optional max; null draws no bar.
+// line: x [...], series [{name, values}], optional min, max; null breaks the line, a
+//   point with no neighbour is drawn as a dot, the end label uses the last non-null value.
+// stats: tiles [{label, value (preformatted string), note?}].
+// At most 4 series are drawn. A chart that fails to draw shows its own error in its figure.
 (function () {
   "use strict";
 
@@ -159,6 +168,7 @@
     cats.forEach(function (cat, ci) {
       var gx = left + ci * slot + (slot - groupW) / 2, group = node("g", {}, svg);
       series.forEach(function (s, si) {
+        if (s.values[ci] === null || s.values[ci] === undefined) return;
         var x = gx + si * (barW + 2), y = scaleY(s.values[ci]);
         node("path", { d: barPath(x, y, barW, Math.max(bottom - y, 1), "up"), fill: SERIES[si] }, group);
         if (valueLabels) label(svg, x + barW / 2, y - 6, fmt(s.values[ci], style), 11, "var(--ink)", 600, "middle");
@@ -172,10 +182,26 @@
     return bottom + 30;
   }
 
+  // Splits a series into runs of consecutive non-null points so a line never bridges a gap.
+  function segments(values, toPoint) {
+    var runs = [[]];
+    values.forEach(function (v, i) {
+      if (v === null || v === undefined) { if (runs[runs.length - 1].length) runs.push([]); }
+      else runs[runs.length - 1].push(toPoint(v, i));
+    });
+    return runs.filter(function (run) { return run.length; });
+  }
+
+  function lastValue(values) {
+    for (var i = values.length - 1; i >= 0; i--) if (values[i] !== null && values[i] !== undefined) return values[i];
+    return null;
+  }
+
   function renderLine(chart, svg, tip, width) {
     var style = chart.format, series = chart.series.slice(0, MAX_SERIES), xs = chart.x;
-    var values = [].concat.apply([], series.map(function (s) { return s.values; })).filter(function (v) { return v !== null; });
-    var ticks = niceTicks(chart.min !== undefined ? chart.min : Math.min(0, Math.min.apply(null, values)), chart.max || Math.max.apply(null, values));
+    var values = [].concat.apply([], series.map(function (s) { return s.values; })).filter(function (v) { return v !== null && v !== undefined; });
+    var low = chart.min !== undefined ? chart.min : Math.min.apply(null, [0].concat(values));
+    var ticks = niceTicks(low, chart.max || (values.length ? Math.max.apply(null, values) : low + 1));
     var left = 44, right = width - 110, top = 14, bottom = 254;
     var scaleY = function (v) { return bottom - (v - ticks[0]) / (ticks[ticks.length - 1] - ticks[0]) * (bottom - top); };
     var scaleX = function (i) { return left + i * (right - left) / Math.max(xs.length - 1, 1); };
@@ -185,12 +211,16 @@
     var cross = node("line", { x1: 0, y1: top, x2: 0, y2: bottom, stroke: "var(--ink-2)", visibility: "hidden" }, svg);
     var ends = [];
     series.forEach(function (s, si) {
-      var pts = s.values.map(function (v, i) { return v === null ? null : [scaleX(i), scaleY(v)]; }).filter(Boolean);
-      node("polyline", { points: pts.map(function (p) { return p.join(","); }).join(" "), fill: "none", stroke: SERIES[si],
-        "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }, svg);
-      var end = pts[pts.length - 1];
+      var runs = segments(s.values, function (v, i) { return [scaleX(i), scaleY(v)]; });
+      runs.forEach(function (run) {
+        if (run.length === 1) node("circle", { cx: run[0][0], cy: run[0][1], r: 2.5, fill: SERIES[si] }, svg);
+        else node("polyline", { points: run.map(function (p) { return p.join(","); }).join(" "), fill: "none", stroke: SERIES[si],
+          "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }, svg);
+      });
+      if (!runs.length) return;
+      var lastRun = runs[runs.length - 1], end = lastRun[lastRun.length - 1];
       node("circle", { cx: end[0], cy: end[1], r: 4, fill: SERIES[si], stroke: "var(--surface)", "stroke-width": 2 }, svg);
-      var value = fmt(s.values[s.values.length - 1], style), named = s.name + " " + value;
+      var value = fmt(lastValue(s.values), style), named = s.name + " " + value;
       ends.push({ x: end[0], y: end[1], text: series.length > 1 && named.length * 12 * 0.56 <= END_LABEL_ROOM ? named : value });
     });
     // Skip all end labels when any two would overlap; the legend and tooltip still identify each series.
@@ -263,7 +293,24 @@
     return Math.round(Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, figure.clientWidth - padding)));
   }
 
+  var FOCUSABLE = "button, [tabindex]";
+
+  // Captures what a redraw would otherwise reset: an open data table and keyboard focus.
+  function interactionState(figure) {
+    var table = figure.querySelector("table");
+    var focusable = Array.prototype.slice.call(figure.querySelectorAll(FOCUSABLE));
+    return { tableOpen: Boolean(table && !table.hidden), focusIndex: focusable.indexOf(document.activeElement) };
+  }
+
+  function restoreInteraction(figure, state) {
+    var button = figure.querySelector("button");
+    if (state.tableOpen && button) button.click();
+    var target = state.focusIndex >= 0 ? figure.querySelectorAll(FOCUSABLE)[state.focusIndex] : null;
+    if (target) target.focus();
+  }
+
   function renderChart(figure, chart) {
+    var state = interactionState(figure);
     var width = chartWidth(figure);
     figure.dataset.renderedWidth = String(width);
     figure.replaceChildren();
@@ -276,12 +323,24 @@
       var svg = node("svg", { role: "img", "aria-label": chart.alt || chart.title }, figure);
       var tip = tooltipFor(figure);
       var renderer = { hbar: renderHbar, columns: renderColumns, line: renderLine }[chart.type];
+      if (!renderer) throw new Error("unsupported chart type \"" + chart.type + "\"");
       var height = renderer(chart, svg, tip, width);
       svg.setAttribute("viewBox", "-4 -16 " + (width + 8) + " " + (height + 16));
     }
     var foot = html("div", { class: "chart-foot" }, figure);
     html("span", { text: "Source: " + chart.source }, foot);
     addTable(chart, figure, foot);
+    restoreInteraction(figure, state);
+  }
+
+  // A chart that fails to draw reports its own error and leaves the other charts in place.
+  function renderOrReport(figure, chart) {
+    try {
+      renderChart(figure, chart);
+    } catch (error) {
+      console.error("Chart \"" + chart.name + "\":", error);
+      figure.textContent = "Chart \"" + chart.name + "\" could not be drawn: " + error.message;
+    }
   }
 
   function loadData() {
@@ -299,7 +358,7 @@
       entries.forEach(function (entry) {
         var figure = entry.target, chart = byName[figure.dataset.chart];
         if (!chart || chart.type === "stats") return;
-        if (Math.abs(chartWidth(figure) - Number(figure.dataset.renderedWidth)) >= 24) renderChart(figure, chart);
+        if (Math.abs(chartWidth(figure) - Number(figure.dataset.renderedWidth)) >= 24) renderOrReport(figure, chart);
       });
     });
     figures.forEach(function (figure) { observer.observe(figure); });
@@ -313,7 +372,7 @@
       data.charts.forEach(function (chart) { byName[chart.name] = chart; });
       figures.forEach(function (figure) {
         var chart = byName[figure.dataset.chart];
-        if (chart) renderChart(figure, chart);
+        if (chart) renderOrReport(figure, chart);
         else figure.textContent = "Chart \"" + figure.dataset.chart + "\" is missing from data.json.";
       });
       rerenderOnResize(figures, byName);
