@@ -147,7 +147,30 @@ def test_hung_job_stops_the_instance_at_six_hours(booted):
     booted.set_counter("rig_busy_ticks", 71)
     out = booted.tick(uptime_s=50000, gpu_util=99, running=1)
     assert booted.stopped()
-    assert "queue busy for 360 minutes" in out
+    assert "busy for 360 minutes" in out
+
+
+def test_busy_gpu_with_an_unreachable_queue_reaches_the_ceiling(booted):
+    booted.set_counter("rig_busy_ticks", 70)
+    booted.tick(uptime_s=50000, gpu_util=99, reachable=False)
+    assert booted.counter("rig_busy_ticks") == 71
+    assert not booted.stopped()
+    out = booted.tick(uptime_s=50000, gpu_util=99, reachable=False)
+    assert booted.stopped()
+    assert "busy for 360 minutes" in out
+
+
+def test_busy_gpu_with_an_empty_queue_counts_toward_the_ceiling(booted):
+    booted.tick(uptime_s=1000, gpu_util=99)
+    assert booted.counter("rig_busy_ticks") == 1
+    assert booted.counter("rig_idle_ticks") == 0
+
+
+def test_idle_tick_resets_the_busy_count(booted):
+    booted.set_counter("rig_busy_ticks", 70)
+    booted.tick(uptime_s=50000, gpu_util=0, reachable=False)
+    assert booted.counter("rig_busy_ticks") == 0
+    assert booted.counter("rig_idle_ticks") == 1
 
 
 @pytest.mark.parametrize("reading", ["[N/A]", "", "No devices were found"])

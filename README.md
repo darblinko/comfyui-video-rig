@@ -148,7 +148,7 @@ A segment is not exactly 5 s: Wan 2.2 renders 81 frames at 16 fps (5.0625 s) and
 | Stuck bootstrap | stop if bootstrap has not finished after 3 h | `bootstrap/idle_watchdog.sh` |
 | GPU idle | stop after `idle_stop_minutes = 30` with GPU use under 5 % and an empty ComfyUI queue | `rig.config.toml` |
 | GPU telemetry | `nvidia-smi` is bounded by a 30 s timeout; a hung or non-numeric reading counts as idle, so the queue alone decides | `bootstrap/idle_watchdog.sh` |
-| Hung job | stop after the ComfyUI queue is busy for `max_job_minutes = 360` | `rig.config.toml` |
+| Hung job | stop after `max_job_minutes = 360` of unbroken activity: queued work, or GPU utilization at 5% or more (which also covers an unreachable queue endpoint) | `rig.config.toml`, `bootstrap/idle_watchdog.sh` |
 | Network | security group with no inbound rules (an existing group with inbound rules or without the rig tags is refused); ComfyUI bound to 127.0.0.1; access through SSM only | `launch_rig.py` |
 | Bucket | ownership checked with `ExpectedBucketOwner`; public access blocked on new and existing buckets | `launch_rig.py` |
 | Teardown | `stop` and `terminate` act only on an instance carrying every rig tag; `deprovision` deletes only a security group in the rig's VPC that carries every rig tag | `launch_rig.py` |

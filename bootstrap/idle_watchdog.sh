@@ -1,7 +1,9 @@
 #!/bin/bash
 # Stops the instance when the GPU has been idle and the ComfyUI queue empty for
-# RIG_IDLE_STOP_MINUTES, or when a job has been running longer than
-# RIG_MAX_JOB_MINUTES (assumed hung: a busy queue must not defeat cost safety).
+# RIG_IDLE_STOP_MINUTES, or when the box has been busy (queued work or GPU
+# utilization at 5% or more) for RIG_MAX_JOB_MINUTES without a break (assumed
+# hung: neither a busy queue nor a busy GPU with an unreachable queue may defeat
+# cost safety).
 # Runs from a systemd timer every 5 minutes. The instance is launched with
 # InstanceInitiatedShutdownBehavior=stop, so `shutdown -h` stops it (EBS and
 # models persist) rather than terminating it.
@@ -55,22 +57,27 @@ d = json.load(sys.stdin)
 print(len(d.get("queue_running", [])) + len(d.get("queue_pending", [])))
 ' 2>/dev/null || echo 0)
 queue=${queue:-0}
+if [ "$queue" -gt 0 ] || [ "$util" -ge 5 ]; then
+  busy=1
+else
+  busy=0
+fi
 
-# Hung-job ceiling: a queue that never drains would otherwise keep the idle
-# logic from ever firing.
-if [ "$queue" -gt 0 ]; then
+# Hung-job ceiling: counts every busy tick, so a queue that never drains, or a
+# busy GPU while the queue endpoint is unreachable (read as 0), still reaches it.
+if [ "$busy" -eq 1 ]; then
   busy_ticks=$(( $(cat "$BUSY_FILE" 2>/dev/null || echo 0) + 1 ))
 else
   busy_ticks=0
 fi
 echo "$busy_ticks" > "$BUSY_FILE"
 if [ $(( busy_ticks * TICK_MINUTES )) -ge "$MAX_JOB_MINUTES" ]; then
-  echo "queue busy for $((busy_ticks * TICK_MINUTES)) minutes (max ${MAX_JOB_MINUTES}); assuming a hung job, stopping instance"
+  echo "busy for $((busy_ticks * TICK_MINUTES)) minutes (queue ${queue}, GPU ${util}%, max ${MAX_JOB_MINUTES}); assuming a hung job, stopping instance"
   shutdown -h now
   exit 0
 fi
 
-if [ "$util" -lt 5 ] && [ "$queue" -eq 0 ]; then
+if [ "$busy" -eq 0 ]; then
   ticks=$(( $(cat "$STATE_FILE" 2>/dev/null || echo 0) + 1 ))
 else
   ticks=0
